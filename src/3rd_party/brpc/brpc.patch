@@ -1,0 +1,81 @@
+diff -ruNa incubator-brpc-0.9.7-ori/src/brpc/builtin/status_service.cpp incubator-brpc-0.9.7/src/brpc/builtin/status_service.cpp
+--- incubator-brpc-0.9.7-ori/src/brpc/builtin/status_service.cpp	2020-01-16 19:29:28.000000000 +0800
++++ incubator-brpc-0.9.7/src/brpc/builtin/status_service.cpp	2021-02-01 10:18:49.375472487 +0800
+@@ -41,8 +41,8 @@
+ void PutVarsHeading(std::ostream& os, bool expand_all);
+ 
+ void StatusService::default_method(::google::protobuf::RpcController* cntl_base,
+-                                   const ::brpc::StatusRequest*,
+-                                   ::brpc::StatusResponse*,
++                                   const ::brpc::SStatusRequest*,
++                                   ::brpc::SStatusResponse*,
+                                    ::google::protobuf::Closure* done) {
+     ClosureGuard done_guard(done);
+     Controller *cntl = static_cast<Controller*>(cntl_base);
+diff -ruNa incubator-brpc-0.9.7-ori/src/brpc/builtin/status_service.h incubator-brpc-0.9.7/src/brpc/builtin/status_service.h
+--- incubator-brpc-0.9.7-ori/src/brpc/builtin/status_service.h	2020-01-16 19:29:28.000000000 +0800
++++ incubator-brpc-0.9.7/src/brpc/builtin/status_service.h	2021-02-01 10:18:49.375472487 +0800
+@@ -27,11 +27,11 @@
+ 
+ class Server;
+ 
+-class StatusService : public status, public Tabbed {
++class StatusService : public sstatus, public Tabbed {
+ public:
+     void default_method(::google::protobuf::RpcController* cntl_base,
+-                        const ::brpc::StatusRequest* request,
+-                        ::brpc::StatusResponse* response,
++                        const ::brpc::SStatusRequest* request,
++                        ::brpc::SStatusResponse* response,
+                         ::google::protobuf::Closure* done);
+ 
+     void GetTabInfo(TabInfoList* info_list) const;
+diff -ruNa incubator-brpc-0.9.7-ori/src/brpc/builtin_service.proto incubator-brpc-0.9.7/src/brpc/builtin_service.proto
+--- incubator-brpc-0.9.7-ori/src/brpc/builtin_service.proto	2020-01-16 19:29:28.000000000 +0800
++++ incubator-brpc-0.9.7/src/brpc/builtin_service.proto	2021-02-01 10:18:49.375472487 +0800
+@@ -33,8 +33,8 @@
+ message VersionResponse {}
+ message HealthRequest {}
+ message HealthResponse {}
+-message StatusRequest {}
+-message StatusResponse {}
++message SStatusRequest {}
++message SStatusResponse {}
+ message ProtobufsRequest {}
+ message ProtobufsResponse {}
+ message ConnectionsRequest {}
+@@ -78,8 +78,8 @@
+     rpc default_method(HealthRequest) returns (HealthResponse);
+ }
+ 
+-service status {
+-    rpc default_method(StatusRequest) returns (StatusResponse);
++service sstatus {
++    rpc default_method(SStatusRequest) returns (SStatusResponse);
+ }
+ 
+ service protobufs {
+diff -ruNa incubator-brpc-0.9.7-ori/src/brpc/input_messenger.cpp incubator-brpc-0.9.7/src/brpc/input_messenger.cpp
+--- incubator-brpc-0.9.7-ori/src/brpc/input_messenger.cpp	2020-01-16 19:29:28.000000000 +0800
++++ incubator-brpc-0.9.7/src/brpc/input_messenger.cpp	2021-02-01 10:19:49.740763800 +0800
+@@ -211,7 +211,7 @@
+                     continue;  // just retry
+                 }
+                 const int saved_errno = errno;
+-                PLOG(WARNING) << "Fail to read from " << *m;
++                PLOG(INFO) << "Fail to read from " << *m;
+                 m->SetFailed(saved_errno, "Fail to read from %s: %s",
+                              m->description().c_str(), berror(saved_errno));
+                 return;
+diff -ruNa incubator-brpc-0.9.7-ori/src/brpc/policy/http_rpc_protocol.cpp incubator-brpc-0.9.7/src/brpc/policy/http_rpc_protocol.cpp
+--- incubator-brpc-0.9.7-ori/src/brpc/policy/http_rpc_protocol.cpp	2020-01-16 19:29:28.000000000 +0800
++++ incubator-brpc-0.9.7/src/brpc/policy/http_rpc_protocol.cpp	2021-02-01 10:19:37.678430529 +0800
+@@ -898,7 +898,7 @@
+     if (rc != 0) {
+         // EPIPE is common in pooled connections + backup requests.
+         const int errcode = errno;
+-        PLOG_IF(WARNING, errcode != EPIPE) << "Fail to write into " << *socket;
++        PLOG_IF(INFO, errcode != EPIPE) << "Fail to write into " << *socket;
+         cntl->SetFailed(errcode, "Fail to write into %s", socket->description().c_str());
+         return;
+     }
