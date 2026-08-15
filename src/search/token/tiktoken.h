@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2025.05.07 18:07:16
+ * Last modified: 2026.08.15 16:39:23
  *
 \****************************************************/
 
@@ -26,6 +26,9 @@ public:
     const std::string& text,
     const std::unordered_set<std::string>& allowed_special = std::unordered_set<std::string>(),
     const std::unordered_set<std::string>& disallowed_special = std::unordered_set<std::string>({"all"})
+    );
+  std::string decode(
+    const std::vector<size_t>& ids
     );
 
 protected:

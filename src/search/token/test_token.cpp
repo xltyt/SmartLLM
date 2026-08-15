@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.08.15 16:08:20
+ * Last modified: 2026.08.15 23:31:08
  *
 \****************************************************/
 
@@ -242,7 +242,7 @@ TEST(Token, Load) {
   LOG(INFO) << "Convert BPE Finished, Len[" << mergeable_ranks.size() << "]";
 }
 
-TEST(Token, QwenBase) {
+TEST(Token, QwenEncodeBase) {
   std::vector<uint32_t> utf_data = CoreBPE::decode_utf8("इस एड्रेस बुक से जुड़ा एड्रेस");
   LOG(INFO) << "Utf[" << mycommon::str_join(utf_data) << "]";
   
@@ -338,7 +338,17 @@ TEST(Token, QwenBase) {
   }
 }
 
-TEST(Token, QwenBatch) {
+TEST(Token, QwenDecodeBase) {
+  QwenToken token("/data/Qwen3-0.6B/");
+  ASSERT_EQ(true, token.encode("Hello") == std::vector<size_t>({9707}));
+  ASSERT_EQ(true, token.decode(std::vector<size_t>({9707})) == "Hello");
+  ASSERT_EQ(true, token.encode("&amp;लेबल") == std::vector<size_t>({27066, 26, 91811, 54784, 105, 91811}));
+  ASSERT_EQ(true, token.decode(std::vector<size_t>({27066, 26, 91811, 54784, 105, 91811})) == "&amp;लेबल");
+  ASSERT_EQ(true, token.encode(mycommon::utf8_normalize("{<|endoftext|>}word followed by \\texttt{<|endoftext|>}. Nonetheless,")) == std::vector<size_t>({90,151643,92,1158,8110,553,1124,1318,5566,90,151643,7810,55633,11}));
+  ASSERT_EQ(true, token.decode(std::vector<size_t>({90,151643,92,1158,8110,553,1124,1318,5566,90,151643,7810,55633,11})) == mycommon::utf8_normalize("{<|endoftext|>}word followed by \\texttt{<|endoftext|>}. Nonetheless,"));
+}
+
+TEST(Token, QwenEncodeBatch) {
   QwenToken token("/data/Qwen3-0.6B/");
   std::vector<std::tuple<int, std::string, std::vector<size_t>>> lines;
   {
@@ -412,6 +422,65 @@ TEST(Token, QwenBatch) {
     if (std::get<2>(info) != my_ids) {
       fail_ct++;
       LOG(INFO) << "Dont Equal[" << std::get<0>(info) << "] Ori[" << mycommon::str_join(std::get<2>(info)) << "] My[" << mycommon::str_join(my_ids) << "]";
+    }
+    running_ct++;
+    if (0 == (running_ct % 1000)) {
+      LOG(INFO) << "Running[" << running_ct << "]";
+    }
+  });
+  LOG(INFO) << "Total[" << lines.size() << "] Fail[" << fail_ct << "]";
+}
+
+TEST(Token, QwenDecodeBatch) {
+  QwenToken token("/data/Qwen3-0.6B/");
+  std::vector<std::tuple<int, std::string, std::vector<size_t>>> lines;
+  {
+    std::string filepath = "/data/token_batch_data.jsonl";
+    std::ifstream file(filepath);
+    ASSERT_EQ(true, file.is_open());
+    int line_index = -1;
+    std::string line;
+    while (std::getline(file, line)) {
+      line_index++;
+      mycommon::str_trim(line, "\r\n\t", false, true);
+      std::string text;
+      std::vector<size_t> ids;
+      {
+        rapidjson::Document doc; 
+        rapidjson::ParseResult ok = doc.Parse(line.c_str());
+        if (ok && doc.IsObject()) {
+          // Support \u0000
+          text = GET_JSON_STRING_BINARY(doc, "text", "");
+          if (doc.HasMember("ids") && doc["ids"].IsArray()) {
+            for (int j = 0; j < doc["ids"].Size(); j++) {
+              rapidjson::Value& json_id = doc["ids"][j];
+              if (json_id.IsInt()) {
+                ids.push_back(json_id.GetInt());
+              }
+              else {
+                LOG(INFO) << "Id Invalid[" << line_index << "]";
+                ASSERT_EQ(false, true);
+              }
+            }
+          }
+        }
+      }
+      if (text.empty()) {
+        LOG(INFO) << "Text Empty[" << line_index << "]";
+        ASSERT_EQ(false, text.empty());
+      }
+      lines.emplace_back(line_index, mycommon::utf8_normalize(text), ids);
+    }
+    file.close();
+    LOG(INFO) << "Total[" << lines.size() << "]";
+  }
+  std::atomic<int> running_ct = {0};
+  std::atomic<int> fail_ct = {0};
+	RunMulti<std::tuple<int, std::string, std::vector<size_t>>>(lines, 16, [&](const std::tuple<int, std::string, std::vector<size_t>>& info) {
+    std::string my_text = token.decode(std::get<2>(info));
+    if (std::get<1>(info) != my_text) {
+      fail_ct++;
+      LOG(INFO) << "Dont Equal[" << std::get<0>(info) << "] Ori[" << std::get<1>(info) << "] My[" << my_text << "]";
     }
     running_ct++;
     if (0 == (running_ct % 1000)) {

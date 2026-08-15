@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.08.15 16:04:26
+ * Last modified: 2026.08.15 17:27:33
  *
 \****************************************************/
 
@@ -750,20 +750,20 @@ CoreBPE::CoreBPE(
     pcre2_code_free(special_regex);
   }
   
-#if 0
   // Decoder
   LOG(INFO) << "CoreBPE::CoreBPE Init Decoder";
-  for (const auto& kv : _encoder) {
+  for (const auto& kv : encoder) {
     _decoder[kv.second] = kv.first;
   }
   for (const auto& kv : _special_tokens_encoder) {
     _special_tokens_decoder[kv.second] = std::vector<uint8_t>(kv.first.begin(), kv.first.end());
   }
-        
+
+#if 0
   // Clone because I don't know how to tell Rust I'm not going to change the map
   LOG(INFO) << "CoreBPE::CoreBPE Init Sort Token";
-  _sorted_token_bytes.reserve(_encoder.size());
-  for (const auto& kv : _encoder) {
+  _sorted_token_bytes.reserve(encoder.size());
+  for (const auto& kv : encoder) {
     _sorted_token_bytes.push_back(kv.first);
   }
   std::sort(_sorted_token_bytes.begin(), _sorted_token_bytes.end(), [](const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {
@@ -817,13 +817,34 @@ std::vector<size_t> encode_single_token(const std::vector<uint8_t>& piece) const
 
 std::vector<size_t> encode_single_piece(const std::vector<uint8_t>& piece) const {
 }
-
-std::vector<uint8_t> decode_bytes(const std::vector<size_t>& tokens) const {
-}
-
-std::vector<uint8_t> decode_single_token_bytes(size_t token) const {
-}
 */
+
+std::string CoreBPE::decode_bytes(const std::vector<size_t>& tokens) const {
+	std::vector<uint8_t> ret;
+	ret.reserve(tokens.size() * 2);
+	for (size_t token : tokens) {
+		auto it = _decoder.find(token);
+		if (it != _decoder.end()) {
+			const auto& token_bytes = it->second;
+			ret.insert(ret.end(), token_bytes.begin(), token_bytes.end());
+			continue;
+		}
+
+		auto special_it = _special_tokens_decoder.find(token);
+		if (special_it != _special_tokens_decoder.end()) {
+			const auto& token_bytes = special_it->second;
+			ret.insert(ret.end(), token_bytes.begin(), token_bytes.end());
+			continue;
+		}
+
+    throw std::runtime_error("token not found: " + std::to_string(token));
+	}
+
+	return std::string(ret.begin(), ret.end());
+}
+
+//std::vector<uint8_t> decode_single_token_bytes(size_t token) const {
+//}
     
 size_t CoreBPE::hash_current_thread() {
   auto tid = std::this_thread::get_id();

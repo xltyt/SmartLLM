@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.08.15 16:02:15
+ * Last modified: 2026.08.15 16:34:25
  *
 \****************************************************/
 
@@ -18,6 +18,9 @@ public:
 public:
   std::vector<size_t> encode(
     const std::string& text
+    );
+  std::string decode(
+    const std::vector<size_t>& ids
     );
 
 protected:

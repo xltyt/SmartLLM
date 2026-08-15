@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.08.15 16:22:16
+ * Last modified: 2026.08.15 16:53:31
  *
 \****************************************************/
 
@@ -107,16 +107,16 @@ public:
     ) const;
   std::vector<size_t> encode_single_token(const std::vector<uint8_t>& piece) const;
   std::vector<size_t> encode_single_piece(const std::vector<uint8_t>& piece) const;
+  */
 
   // Decode
-  std::vector<uint8_t> decode_bytes(const std::vector<size_t>& tokens) const;
-  std::vector<uint8_t> decode_single_token_bytes(size_t token) const;
+  std::string decode_bytes(const std::vector<size_t>& tokens) const;
+  //std::vector<uint8_t> decode_single_token_bytes(size_t token) const;
 
   // Util
-  std::vector<std::vector<uint8_t>> token_byte_values() const {
-    return sorted_token_bytes_;
-  }
-  */
+  //std::vector<std::vector<uint8_t>> token_byte_values() const {
+  //  return sorted_token_bytes_;
+  //}
 protected:
   static constexpr size_t MAX_NUM_THREADS = 128;
   static size_t hash_current_thread();

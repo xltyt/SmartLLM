@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.08.15 16:05:10
+ * Last modified: 2026.08.15 16:53:40
  *
 \****************************************************/
 
@@ -128,6 +128,12 @@ std::vector<size_t> TikTokenEncoding::encode(
   }
   
   return _core_bpe->encode(text, allowed_special);
+}
+  
+std::string TikTokenEncoding::decode(
+  const std::vector<size_t>& ids
+  ) {
+  return _core_bpe->decode_bytes(ids);
 }
 
 /* vim: set expandtab nu ts=2 sw=2 sts=2: */

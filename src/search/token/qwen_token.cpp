@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.08.13 23:11:34
+ * Last modified: 2026.08.15 16:44:35
  *
 \****************************************************/
 
@@ -66,6 +66,14 @@ std::vector<size_t> QwenToken::encode(
 	  text,
     std::unordered_set<std::string>({"all"}),
     std::unordered_set<std::string>({"all"})
+    );
+}
+  
+std::string QwenToken::decode(
+  const std::vector<size_t>& ids
+  ) {
+  return _encoding->decode(
+	  ids
     );
 }
 
