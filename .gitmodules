@@ -1,6 +1,3 @@
-[submodule "src/ref"]
-	path = src/ref
-	url = https://github.com/GeeeekExplorer/nano-vllm.git
 [submodule "src/3rd_party/rapidjson/pkg"]
 	path = src/3rd_party/rapidjson/pkg
 	url = https://github.com/Tencent/rapidjson
@@ -64,3 +61,15 @@
 [submodule "src/3rd_party/safetensors-cpp/pkg"]
 	path = src/3rd_party/safetensors-cpp/pkg
 	url = https://github.com/syoyo/safetensors-cpp.git
+[submodule "src/3rd_party/cmake/pkg"]
+	path = src/3rd_party/cmake/pkg
+	url = https://github.com/Kitware/CMake.git
+[submodule "src/ref/src"]
+	path = src/ref/src
+	url = https://github.com/GeeeekExplorer/nano-vllm.git
+[submodule "src/3rd_party/pcre/pkg"]
+	path = src/3rd_party/pcre/pkg
+	url = https://github.com/PCRE2Project/pcre2.git
+[submodule "src/3rd_party/abseil/pkg"]
+	path = src/3rd_party/abseil/pkg
+	url = https://github.com/abseil/abseil-cpp

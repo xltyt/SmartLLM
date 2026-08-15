@@ -98,6 +98,10 @@ if [ ! -d $DST/torch/cpu/lib ]; then
     -DCMAKE_MODULE_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
     -DCMAKE_SHARED_LINKER_FLAGS="-static-libstdc++ -static-libgcc" \
     -DCMAKE_INSTALL_PREFIX=$DST/torch/cpu \
+    -DUSE_STATIC_MKL=ON \
+    -DUSE_MKLDNN=ON \
+    -DUSE_MKL=ON \
+    -DMKL_ROOT=$DST/intel/mkl/latest \
     ..
     make VERBOSE=1 -j${CPU_COUNT}
     make install

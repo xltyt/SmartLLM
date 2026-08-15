@@ -1,0 +1,12 @@
+syntax = "proto2";
+
+option cc_generic_services = true;
+
+package proto;
+ 
+message SearchRequest { };
+message SearchResponse { };
+ 
+service search {
+      rpc default_method(SearchRequest) returns (SearchResponse);
+};

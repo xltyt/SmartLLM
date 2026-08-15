@@ -6,3 +6,4 @@
 /*/dict
 /*/etc
 /build
+/src/search/layers/*.pt
