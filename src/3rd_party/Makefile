@@ -37,6 +37,8 @@ endif
 	@if [ ! -d ../../$(PLATFORM)/local/include/eigen3 ]; then             cd eigen && PLATFORM=$(PLATFORM) bash build.sh; fi
 	@if [ ! -f ../../$(PLATFORM)/local/include/safetensors.hh ]; then     cd safetensors-cpp && PLATFORM=$(PLATFORM) bash build.sh; fi
 	@if [ ! -d ../../$(PLATFORM)/local/include/absl/ ]; then              cd abseil && PLATFORM=$(PLATFORM) bash build.sh; fi
+	@if [ ! -d ../../$(PLATFORM)/local/include/nlohmann/ ]; then          cd nlohmann && PLATFORM=$(PLATFORM) bash build.sh; fi
+	@if [ ! -d ../../$(PLATFORM)/local/include/minja/ ]; then             cd minja && PLATFORM=$(PLATFORM) bash build.sh; fi
 	@rm -rf ../../build
 
 clean:

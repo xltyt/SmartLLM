@@ -7,7 +7,8 @@ all : prep
 
 # apt install lrzsz git vim git-lfs build-essential cmake perl autoconf libtool pip python-is-python3 gcc-aarch64-linux-gnu g++-aarch64-linux-gnu gfortran-aarch64-linux-gnu libssl-dev tcl
 # pip install setuptools PyYAML typing_extensions --index-url https://mirrors.aliyun.com/pypi/simple/
-#
+# apt install clang-tidy
+
 prep:
 	@echo "\033[32m=====> Build amd64...\033[0m"
 	make -C 3rd_party
