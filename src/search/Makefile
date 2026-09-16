@@ -81,6 +81,7 @@ BASE_LIBS += \
   $(CUDA_LIB) \
   -L$(THIRD_DIR)/lib \
   $(ABSL_LIB) \
+  -lsafetensors_cpp \
   -lboost_system -lboost_filesystem -lboost_regex \
   -lpcre2-32 -lpcre2-16 -lpcre2-8 \
   -licuuc -licuio -licudata \
@@ -117,6 +118,11 @@ CPPFLAGS  = $(CFLAGS) -std=c++17
 CXXFLAGS  = $(CFLAGS) -std=c++17
 
 SOURCES += \
+  utils/model_utils.o \
+  layers/activation.o \
+  layers/layer_norm.o \
+  layers/rotary_embedding.o \
+  layers/sampler.o \
   token/core_bpe.cpp \
   token/tiktoken.cpp \
   token/qwen_token.cpp \
@@ -146,8 +152,32 @@ else
 endif
 	$(STRIP) $@
   
+ifeq ($(MODE),gpu)
+  TEST_LAYERS_MODULE_NAME=test_layers_gpu_$(CUDA_VERSION)
+else
+  TEST_LAYERS_MODULE_NAME=test_layers
+endif
+TEST_MODEL_UTILS_MODULE_NAME=test_module_utils
+
 test: \
+	$(TEST_DIR)/$(TEST_LAYERS_MODULE_NAME) \
+	$(TEST_DIR)/$(TEST_MODEL_UTILS_MODULE_NAME) \
 	$(TEST_DIR)/test_token
+
+$(TEST_DIR)/$(TEST_LAYERS_MODULE_NAME) : \
+	$(OBJS_DIR)/layers/test_layers.o \
+	$(OBJS_DIR)/layers/activation.o \
+	$(OBJS_DIR)/layers/layer_norm.o \
+	$(OBJS_DIR)/layers/rotary_embedding.o \
+	$(OBJS_DIR)/layers/sampler.o
+	$(CXX) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -Wl,-rpath=../lib -Wl,-rpath=lib -lgtest
+	$(STRIP) $@
+
+$(TEST_DIR)/$(TEST_MODEL_UTILS_MODULE_NAME) : \
+	$(OBJS_DIR)/utils/test_model_utils.o \
+	$(OBJS_DIR)/utils/model_utils.o
+	$(CXX) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -Wl,-rpath=../lib -Wl,-rpath=lib -lgtest
+	$(STRIP) $@
 
 $(OBJS_DIR)/search.pb.o: proto/search.proto
 	$(THIRD_HOST_DIR)/bin/protoc --cpp_out=$(OBJS_DIR) --proto_path=$(CURRENT_DIR)/proto $(CURRENT_DIR)/proto/search.proto
@@ -172,7 +202,9 @@ clean:
 	rm -f $(OBJS)
 	rm -f $(OBJS_DIR)/search.pb.*
 	rm -f $(OBJS_DIR)/main.o
+	rm -f $(OBJS_DIR)/layers/test_layers.o
 	rm -f $(OBJS_DIR)/token/test_token.o
+	rm -f $(OBJS_DIR)/utils/test_model_utils.o
 	rm -rf rpc_data
 
 distclean:

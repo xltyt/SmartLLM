@@ -5,10 +5,17 @@
  *
 \****************************************************/
 
-#ifndef _MODEL_UTILS_H__
-#define _MODEL_UTILS_H__
+#ifndef _ACTIVATION_H__
+#define _ACTIVATION_H__
 
+#define C10_USE_GLOG
+#include <torch/torch.h>
+#include <glog/logging.h>
 
+class SiluAndMul : public torch::nn::Module {
+public:
+  torch::Tensor forward(torch::Tensor x);
+};
 
 #endif
 
