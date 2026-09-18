@@ -123,6 +123,7 @@ SOURCES += \
   layers/layer_norm.o \
   layers/rotary_embedding.o \
   layers/sampler.o \
+  model/qwen3.o \
   token/core_bpe.cpp \
   token/tiktoken.cpp \
   token/qwen_token.cpp \
@@ -158,10 +159,12 @@ else
   TEST_LAYERS_MODULE_NAME=test_layers
 endif
 TEST_MODEL_UTILS_MODULE_NAME=test_module_utils
+TEST_MODEL_QWEN3_MODULE_NAME=test_model_qwen3
 
 test: \
 	$(TEST_DIR)/$(TEST_LAYERS_MODULE_NAME) \
 	$(TEST_DIR)/$(TEST_MODEL_UTILS_MODULE_NAME) \
+	$(TEST_DIR)/$(TEST_MODEL_QWEN3_MODULE_NAME) \
 	$(TEST_DIR)/test_token
 
 $(TEST_DIR)/$(TEST_LAYERS_MODULE_NAME) : \
@@ -175,6 +178,14 @@ $(TEST_DIR)/$(TEST_LAYERS_MODULE_NAME) : \
 
 $(TEST_DIR)/$(TEST_MODEL_UTILS_MODULE_NAME) : \
 	$(OBJS_DIR)/utils/test_model_utils.o \
+	$(OBJS_DIR)/utils/model_utils.o
+	$(CXX) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -Wl,-rpath=../lib -Wl,-rpath=lib -lgtest
+	$(STRIP) $@
+
+$(TEST_DIR)/$(TEST_MODEL_QWEN3_MODULE_NAME) : \
+	$(OBJS_DIR)/model/test_qwen3.o \
+	$(OBJS_DIR)/model/qwen3.o \
+	$(OBJS_DIR)/layers/layer_norm.o \
 	$(OBJS_DIR)/utils/model_utils.o
 	$(CXX) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -Wl,-rpath=../lib -Wl,-rpath=lib -lgtest
 	$(STRIP) $@
@@ -205,6 +216,7 @@ clean:
 	rm -f $(OBJS_DIR)/layers/test_layers.o
 	rm -f $(OBJS_DIR)/token/test_token.o
 	rm -f $(OBJS_DIR)/utils/test_model_utils.o
+	rm -f $(OBJS_DIR)/model/test_qwen3.o
 	rm -rf rpc_data
 
 distclean:

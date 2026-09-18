@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.16 16:27:58
+ * Last modified: 2026.09.17 19:36:23
  *
 \****************************************************/
 
@@ -10,29 +10,30 @@
 #include <torch/torch.h>
 #include <torch/script.h>
 #include <glog/logging.h>
+#include <safetensors.hh>
 #include <file_utils.h>
 #include "model_utils.h"
 
 struct MyModel : torch::nn::Module {
-    MyModel(std::int64_t hidden_size = 4096, std::int64_t intermediate_size = 11008) {
-        fc1 = register_module("fc1", torch::nn::Linear(hidden_size, intermediate_size));
-        fc2 = register_module("fc2", torch::nn::Linear(intermediate_size, hidden_size));
-    }
+  MyModel(std::int64_t hidden_size = 4096, std::int64_t intermediate_size = 11008) {
+    fc1 = register_module("fc1", torch::nn::Linear(hidden_size, intermediate_size));
+    fc2 = register_module("fc2", torch::nn::Linear(intermediate_size, hidden_size));
+  }
 
-    std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward_with_intermediates(
-        const torch::Tensor & input) {
-        auto fc1_output = fc1->forward(input);
-        auto silu_output = torch::silu(fc1_output);
-        auto output = fc2->forward(silu_output);
-        return {fc1_output, silu_output, output};
-    }
+  std::tuple<torch::Tensor, torch::Tensor, torch::Tensor> forward_with_intermediates(
+      const torch::Tensor & input) {
+    auto fc1_output = fc1->forward(input);
+    auto silu_output = torch::silu(fc1_output);
+    auto output = fc2->forward(silu_output);
+    return {fc1_output, silu_output, output};
+  }
 
-    torch::Tensor forward(const torch::Tensor & input) {
-        return std::get<2>(forward_with_intermediates(input));
-    }
+  torch::Tensor forward(const torch::Tensor & input) {
+    return std::get<2>(forward_with_intermediates(input));
+  }
 
-    torch::nn::Linear fc1{nullptr};
-    torch::nn::Linear fc2{nullptr};
+  torch::nn::Linear fc1{nullptr};
+  torch::nn::Linear fc2{nullptr};
 };
 
 bool check_close(
@@ -62,6 +63,25 @@ bool check_close(
   return close;
 }
 
+TEST(Utils, SafeTensors) {
+  std::string file_path = "model.safetensors";
+  // Parse
+  std::string warn;
+  std::string err;
+  safetensors::safetensors_t st;
+  if (!safetensors::load_from_file(file_path, &st, &warn, &err)) {
+    throw std::runtime_error("Failed to parse safetensors[" + err + "]");
+  }
+  if (!safetensors::validate_data_offsets(st, err)) {
+    throw std::runtime_error("Invalid data_offsets[" + err + "]");
+  }
+
+  const std::vector<std::string> tensor_keys = st.tensors.keys();
+  for (auto &key : tensor_keys) {
+    LOG(INFO) << "Key[" << key << "]";
+  }
+}
+
 TEST(Utils, ModelUtils) {
   std::string content;
   mycommon::file_read("model_utils.pt", content);
@@ -82,6 +102,7 @@ TEST(Utils, ModelUtils) {
   MyModel model(hidden_size, intermediate_size);
   load_module_from_safetensors(model, "model.safetensors");
   model.eval();
+  //model.to(torch::kCUDA);
 	
   torch::InferenceMode inference_mode;
   const auto [fc1_output, silu_output, output] = model.forward_with_intermediates(input);
