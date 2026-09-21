@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.16 15:47:54
+ * Last modified: 2026.09.18 18:08:34
  *
 \****************************************************/
 
@@ -25,6 +25,14 @@ struct TensorPrintOptions {
 std::string format_tensor(
   const torch::Tensor & tensor,
   const TensorPrintOptions & options = {}
+  );
+
+bool check_close(
+  const std::string & name,
+  const torch::Tensor & actual,
+  const torch::Tensor & expected,
+  double rtol,
+  double atol
   );
 
 #endif

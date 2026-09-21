@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.17 19:36:23
+ * Last modified: 2026.09.18 18:08:50
  *
 \****************************************************/
 
@@ -35,33 +35,6 @@ struct MyModel : torch::nn::Module {
   torch::nn::Linear fc1{nullptr};
   torch::nn::Linear fc2{nullptr};
 };
-
-bool check_close(
-  const std::string & name,
-  const torch::Tensor & actual,
-  const torch::Tensor & expected,
-  double rtol,
-  double atol
-  ) {
-  if (actual.sizes() != expected.sizes()) {
-    LOG(ERROR) << name << ": shape mismatch actual=" << actual.sizes() << ", expected=" << expected.sizes();
-    return false;
-  }
-
-  const auto actual_flat = actual.flatten().to(torch::kFloat64);
-  const auto expected_flat = expected.flatten().to(torch::kFloat64);
-  const auto difference = (actual_flat - expected_flat).abs();
-  const double max_abs = difference.max().item<double>();
-  const double mean_abs = difference.mean().item<double>();
-  const double norm_product = actual_flat.norm().item<double>() * expected_flat.norm().item<double>();
-  const double cosine = norm_product == 0.0
-    ? (torch::equal(actual_flat, expected_flat) ? 1.0 : 0.0)
-    : actual_flat.dot(expected_flat).item<double>() / norm_product;
-  const bool close = torch::allclose(actual, expected, rtol, atol);
-
-  LOG(INFO) << name << ": max_abs=" << max_abs << ", mean_abs=" << mean_abs << ", cosine=" << cosine << ", allclose=" << std::boolalpha << close;
-  return close;
-}
 
 TEST(Utils, SafeTensors) {
   std::string file_path = "model.safetensors";
