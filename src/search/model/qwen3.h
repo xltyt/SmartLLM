@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2020 All Rights Reserved
- * Last modified: 2026.09.22 15:03:50
+ * Last modified: 2026.09.22 15:55:41
  *
 \****************************************************/
 
@@ -134,6 +134,11 @@ class Qwen3ForCausalLM : public torch::nn::Module {
 public:
   Qwen3ForCausalLM(int vocab_size, int hidden_size, int num_layers, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps);
   virtual ~Qwen3ForCausalLM();
+
+public:
+  torch::Tensor forward(
+    const std::vector<int64_t>& input_ids
+    );
 
 public:
   std::shared_ptr<Qwen3Model> model{nullptr};

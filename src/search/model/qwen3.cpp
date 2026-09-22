@@ -420,5 +420,12 @@ Qwen3ForCausalLM::Qwen3ForCausalLM::Qwen3ForCausalLM(int vocab_size, int hidden_
 
 Qwen3ForCausalLM::~Qwen3ForCausalLM() {
 }
+  
+torch::Tensor Qwen3ForCausalLM::forward(
+  const std::vector<int64_t>& input_ids
+  ) {
+  auto hidden_states = this->model->forward(input_ids);
+  return this->lm_head(hidden_states);
+}
 
 /* vim: set expandtab nu ts=2 sw=2 sts=2: */

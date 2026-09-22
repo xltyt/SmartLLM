@@ -35,4 +35,7 @@ python ${CUR_DIR}/test_rotary_emb.py
 python ${CUR_DIR}/test_model.py
 ./test_model_qwen3 --gtest_filter=Model.Qwen3Model
 
+python ${CUR_DIR}/test_lm.py
+./test_model_qwen3 --gtest_filter=Model.Qwen3Lm
+
 # vim: set expandtab ts=4 sw=4 sts=4:
