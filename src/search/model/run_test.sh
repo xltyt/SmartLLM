@@ -27,4 +27,7 @@ python ${CUR_DIR}/test_layer.py 0
 python ${CUR_DIR}/test_layer.py 1
 ./test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayer1
 
+python ${CUR_DIR}/test_rotary_emb.py
+./test_model_qwen3 --gtest_filter=Model.Qwen3RotaryEmb
+
 # vim: set expandtab ts=4 sw=4 sts=4:

@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2020 All Rights Reserved
- * Last modified: 2026.09.21 19:50:50
+ * Last modified: 2026.09.22 13:25:08
  *
 \****************************************************/
 
@@ -72,15 +72,60 @@ public:
   std::shared_ptr<Qwen3MLP> mlp{nullptr};
 };
 
+class Qwen3RotaryEmbedding : public torch::nn::Module {
+public:
+  Qwen3RotaryEmbedding(
+    int64_t head_dim,
+    double rope_theta = 1000000.0,
+    torch::Device device = torch::kCPU);
+
+  //
+  //  Computes the inverse frequencies according to the original RoPE implementation
+  //  Args:
+  //      config ([`~transformers.PreTrainedConfig`]):
+  //          The model configuration.
+  //      device (`torch.device`):
+  //          The device to use for initialization of the inverse frequencies.
+  //      seq_len (`int`, *optional*):
+  //          The current sequence length. Unused for this type of RoPE.
+  //  Returns:
+  //      Tuple of (`torch.Tensor`, `float`), containing the inverse frequencies for the RoPE embeddings and the
+  //      post-processing scaling factor applied to the computed cos/sin (unused in this type of RoPE).
+  //
+  static std::tuple<torch::Tensor, double> compute_default_rope_parameters(
+    int64_t head_dim,
+    double rope_theta,
+    torch::Device device = torch::kCPU
+    );
+
+  std::pair<torch::Tensor, torch::Tensor> forward(
+    const torch::Tensor& x,
+    const torch::Tensor& position_ids
+    );
+
+private:
+  double _attention_scaling{1.0};
+  torch::Tensor _inv_freq;
+  torch::Tensor _original_inv_freq;
+};
+
+
 class Qwen3Model : public torch::nn::Module {
 public:
   Qwen3Model(int vocab_size, int hidden_size, int num_layers, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps);
   virtual ~Qwen3Model();
+  
+public:
+  torch::Tensor forward(
+    const std::vector<int64_t>& input_ids,
+    const std::optional<torch::Tensor>& attention_mask
+    );
 
 public:
   torch::nn::Embedding embed_tokens{nullptr};
   torch::nn::ModuleList layers{nullptr};
   std::shared_ptr<RMSNorm> norm{nullptr};
+  std::shared_ptr<Qwen3RotaryEmbedding> rotary_emb{nullptr};
 };
 
 class Qwen3ForCausalLM : public torch::nn::Module {

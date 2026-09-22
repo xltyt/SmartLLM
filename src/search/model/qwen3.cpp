@@ -265,6 +265,59 @@ torch::Tensor Qwen3DecoderLayer::forward(
   return hidden_states_new;
 }
 
+// ============ RotaryEmbedding ============
+Qwen3RotaryEmbedding::Qwen3RotaryEmbedding(
+  int64_t head_dim,
+  double rope_theta /*= 1000000.0*/,
+  torch::Device device /*= torch::kCPU*/) {
+        
+  auto [computed_inv_freq, factor] = compute_default_rope_parameters(head_dim, rope_theta, device);
+  _attention_scaling = factor;
+
+  _inv_freq = register_buffer("inv_freq", computed_inv_freq);
+  _original_inv_freq = register_buffer("original_inv_freq", computed_inv_freq.clone());
+}
+
+std::tuple<torch::Tensor, double> Qwen3RotaryEmbedding::compute_default_rope_parameters(
+  int64_t head_dim,
+  double rope_theta,
+  torch::Device device /*= torch::kCPU*/) {
+  
+  auto arange_tensor = torch::arange(0, head_dim, 2, torch::device(device).dtype(torch::kInt64));
+
+  auto exponent = arange_tensor.to(torch::kFloat32) / static_cast<double>(head_dim);
+
+  auto inv_freq = 1.0 / torch::pow(rope_theta, exponent);
+  
+  double attention_factor = 1.0;
+  return std::make_tuple(inv_freq, attention_factor);
+}
+
+std::pair<torch::Tensor, torch::Tensor> Qwen3RotaryEmbedding::forward(
+  const torch::Tensor& x,
+  const torch::Tensor& position_ids
+  ) {
+  torch::NoGradGuard no_grad;
+
+  int64_t batch_size = position_ids.size(0);
+  auto inv_freq_expanded = _inv_freq
+    .unsqueeze(0).unsqueeze(-1)
+    .to(torch::kFloat32)
+    .expand({batch_size, -1, 1})
+    .to(x.device());
+
+  auto position_ids_expanded = position_ids.unsqueeze(1).to(torch::kFloat32);
+
+  auto freqs = torch::matmul(inv_freq_expanded, position_ids_expanded).transpose(1, 2);
+
+  auto emb = torch::cat({freqs, freqs}, /*dim=*/-1);
+
+  auto cos = (emb.cos() * _attention_scaling).to(x.dtype());
+  auto sin = (emb.sin() * _attention_scaling).to(x.dtype());
+
+  return {cos, sin};
+}
+
 // ============ Model ============
 Qwen3Model::Qwen3Model(int vocab_size, int hidden_size, int num_layers, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps) {
   this->embed_tokens = register_module("embed_tokens", torch::nn::Embedding(vocab_size, hidden_size));
@@ -282,9 +335,19 @@ Qwen3Model::Qwen3Model(int vocab_size, int hidden_size, int num_layers, int num_
   }
 
   this->norm = register_module("norm", std::make_shared<RMSNorm>(hidden_size, rms_norm_eps));
+    
+  this->rotary_emb = std::make_shared<Qwen3RotaryEmbedding>(head_dim);
 }
 
 Qwen3Model::~Qwen3Model() {
+}
+  
+torch::Tensor Qwen3Model::forward(
+  const std::vector<int64_t>& ids,
+  const std::optional<torch::Tensor>& attention_mask
+  ) {
+  //auto inputs_embeds = this->embed_tokens.forward(input_ids);
+  return torch::tensor(0);
 }
 
 // ============ Top-level Model ============

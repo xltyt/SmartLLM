@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.22 10:35:33
+ * Last modified: 2026.09.22 13:29:57
  *
 \****************************************************/
 
@@ -202,6 +202,33 @@ TEST(Model, Qwen3ModelLayer1) {
   double rtol = 1e-5;
 	double atol = 1e-5;
 	ASSERT_EQ(true, check_close("layer_output", layer_output_1, ref_layer_output_1, rtol, atol));
+}
+
+TEST(Model, Qwen3RotaryEmb) {
+  InitModel();
+  
+  std::string content;
+  mycommon::file_read("./test_rotary_emb.pt", content);
+  torch::IValue ivalue = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end()));
+  if (!ivalue.isGenericDict()) {
+    LOG(WARNING) << "Loaded data is not a dictionary!";
+    ASSERT_EQ(true, false);
+  }
+	auto data = ivalue.toGenericDict();
+	auto ids = data.at("ids").toTensor();
+	auto hidden_states = data.at("hidden_states").toTensor();
+	auto position_ids = data.at("position_ids").toTensor();
+	auto ref_output_cos = data.at("output_cos").toTensor();
+	auto ref_output_sin = data.at("output_sin").toTensor();
+  
+  auto [output_cos, output_sin] = (_model->model->rotary_emb.get())->forward(hidden_states, position_ids);
+  double rtol = 1e-5;
+	double atol = 1e-5;
+	ASSERT_EQ(true, check_close("output_cos", output_cos, ref_output_cos, rtol, atol));
+	ASSERT_EQ(true, check_close("output_sin", output_sin, ref_output_sin, rtol, atol));
+}
+
+TEST(Model, Qwen3Mask) {
 }
 
 TEST(Model, Qwen3Model) {
