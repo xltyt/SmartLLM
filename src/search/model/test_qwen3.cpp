@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.22 13:29:57
+ * Last modified: 2026.09.22 15:18:41
  *
 \****************************************************/
 
@@ -228,13 +228,48 @@ TEST(Model, Qwen3RotaryEmb) {
 	ASSERT_EQ(true, check_close("output_sin", output_sin, ref_output_sin, rtol, atol));
 }
 
-TEST(Model, Qwen3Mask) {
+TEST(Model, Qwen3AttentionMask) {
+  InitModel();
+  
+  std::string content;
+  mycommon::file_read("./test_rotary_emb.pt", content);
+  torch::IValue ivalue = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end()));
+  if (!ivalue.isGenericDict()) {
+    LOG(WARNING) << "Loaded data is not a dictionary!";
+    ASSERT_EQ(true, false);
+  }
+	auto data = ivalue.toGenericDict();
+	auto ids = data.at("ids").toTensor();
+	auto ref_hidden_states = data.at("hidden_states").toTensor();
+	auto ref_position_ids = data.at("position_ids").toTensor();
+
+  std::vector<int64_t> input_ids(ids.data_ptr<int64_t>(), ids.data_ptr<int64_t>() + ids.numel());
+  auto [hidden_states, position_ids] = _model->model->prepare(input_ids);
+  double rtol = 1e-5;
+	double atol = 1e-5;
+	ASSERT_EQ(true, check_close("hidden_states", hidden_states, ref_hidden_states, rtol, atol));
+	ASSERT_EQ(true, check_close("position_ids", position_ids, ref_position_ids, rtol, atol));
 }
 
 TEST(Model, Qwen3Model) {
-}
+  InitModel();
+  
+  std::string content;
+  mycommon::file_read("./test_model.pt", content);
+  torch::IValue ivalue = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end()));
+  if (!ivalue.isGenericDict()) {
+    LOG(WARNING) << "Loaded data is not a dictionary!";
+    ASSERT_EQ(true, false);
+  }
+	auto data = ivalue.toGenericDict();
+	auto ids = data.at("ids").toTensor();
+	auto ref_last_hidden_state = data.at("last_hidden_state").toTensor();
 
-TEST(Model, Qwen3ModelNorm) {
+  std::vector<int64_t> input_ids(ids.data_ptr<int64_t>(), ids.data_ptr<int64_t>() + ids.numel());
+  auto last_hidden_state = _model->model->forward(input_ids);
+  double rtol = 1e-4;
+	double atol = 1e-4;
+	ASSERT_EQ(true, check_close("last_hidden_state", last_hidden_state, ref_last_hidden_state, rtol, atol));
 }
 
 TEST(Model, Qwen3LmHead) {

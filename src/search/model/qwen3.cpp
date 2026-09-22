@@ -319,6 +319,25 @@ std::pair<torch::Tensor, torch::Tensor> Qwen3RotaryEmbedding::forward(
 }
 
 // ============ Model ============
+
+inline torch::Tensor make_causal_mask(
+  int64_t seq_len,
+  torch::Dtype dtype = torch::kFloat32,
+  torch::Device device = torch::kCPU
+  ) {
+  // 1. 在 Softmax 中使用 -1e4f 或 -1e9f 足以让概率彻底归零，同时避免极端下溢
+  constexpr float MIN_VAL = -1e4f;
+
+  // 2. 创建 seq_len x seq_len 的常数矩阵
+  auto mask = torch::full({seq_len, seq_len}, MIN_VAL, torch::dtype(dtype).device(device));
+
+  // 3. triu(1) 仅保留对角线上方为 MIN_VAL，其余位置清零
+  mask = torch::triu(mask, /*diagonal=*/1);
+
+  // 4. unsqueeze 扩展至 [1, 1, seq_len, seq_len]
+  return mask.unsqueeze(0).unsqueeze(0);
+}
+
 Qwen3Model::Qwen3Model(int vocab_size, int hidden_size, int num_layers, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps) {
   this->embed_tokens = register_module("embed_tokens", torch::nn::Embedding(vocab_size, hidden_size));
 
@@ -341,13 +360,44 @@ Qwen3Model::Qwen3Model(int vocab_size, int hidden_size, int num_layers, int num_
 
 Qwen3Model::~Qwen3Model() {
 }
-  
-torch::Tensor Qwen3Model::forward(
-  const std::vector<int64_t>& ids,
-  const std::optional<torch::Tensor>& attention_mask
+
+std::tuple<torch::Tensor, torch::Tensor> Qwen3Model::prepare(
+  const std::vector<int64_t>& input_ids
   ) {
-  //auto inputs_embeds = this->embed_tokens.forward(input_ids);
-  return torch::tensor(0);
+
+  torch::Tensor tensor_input_ids = torch::from_blob(
+    (void *)input_ids.data(), 
+    {1, static_cast<int64_t>(input_ids.size())}, 
+    torch::kInt64
+    );
+  auto inputs_embeds = this->embed_tokens->forward(tensor_input_ids);
+
+  int64_t seq_len = inputs_embeds.size(1);
+
+  auto position_ids = torch::arange(seq_len, torch::device(inputs_embeds.device()).dtype(torch::kInt64)) + 0;
+
+  position_ids = position_ids.unsqueeze(0);
+
+  return std::make_tuple(inputs_embeds, position_ids);
+}
+
+torch::Tensor Qwen3Model::forward(
+  const std::vector<int64_t>& input_ids
+  ) {
+  
+  auto [hidden_states, position_ids] = prepare(input_ids);
+  
+  auto position_embeddings = this->rotary_emb->forward(hidden_states, position_ids);
+  
+  auto attention_mask = make_causal_mask(input_ids.size());
+  
+  for (int i = 0; i < this->layers->size(); i++) {
+    Qwen3DecoderLayer *layer = (Qwen3DecoderLayer *)this->layers[i].get();
+    hidden_states = layer->forward(hidden_states, position_embeddings, attention_mask);
+  }
+  hidden_states = this->norm->forward(hidden_states);
+  
+  return hidden_states;
 }
 
 // ============ Top-level Model ============

@@ -30,4 +30,9 @@ python ${CUR_DIR}/test_layer.py 1
 python ${CUR_DIR}/test_rotary_emb.py
 ./test_model_qwen3 --gtest_filter=Model.Qwen3RotaryEmb
 
+./test_model_qwen3 --gtest_filter=Model.Qwen3AttentionMask
+
+python ${CUR_DIR}/test_model.py
+./test_model_qwen3 --gtest_filter=Model.Qwen3Model
+
 # vim: set expandtab ts=4 sw=4 sts=4:

@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2020 All Rights Reserved
- * Last modified: 2026.09.22 13:25:08
+ * Last modified: 2026.09.22 15:03:50
  *
 \****************************************************/
 
@@ -116,9 +116,11 @@ public:
   virtual ~Qwen3Model();
   
 public:
+  std::tuple<torch::Tensor, torch::Tensor> prepare(
+    const std::vector<int64_t>& input_ids
+    );
   torch::Tensor forward(
-    const std::vector<int64_t>& input_ids,
-    const std::optional<torch::Tensor>& attention_mask
+    const std::vector<int64_t>& input_ids
     );
 
 public:
