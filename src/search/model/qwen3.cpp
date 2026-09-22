@@ -2,6 +2,7 @@
 #include "safetensors.hh"
 #include <fstream>
 #include <vector>
+#include "utils/model_utils.h"
 
 // ============ Attention ============
 Qwen3Attention::Qwen3Attention(int hidden_size, int num_heads, int num_kv_heads, int head_dim, float rms_norm_eps) {
@@ -183,6 +184,20 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
 }
 
 // ============ MLP ============
+//
+// See Gaussian Error Linear Units (Hendrycks et al., https://arxiv.org/abs/1606.08415) where the SiLU (Sigmoid Linear
+// Unit) was originally introduced and coined, and see Sigmoid-Weighted Linear Units for Neural Network Function
+// Approximation in Reinforcement Learning (Elfwing et al., https://arxiv.org/abs/1702.03118) and Swish: a Self-Gated
+// Activation Function (Ramachandran et al., https://arxiv.org/abs/1710.05941v1) where the SiLU was experimented with
+// later.
+//
+class SiLUActivation : public torch::nn::Module {
+public:
+  torch::Tensor forward(const torch::Tensor& input) {
+    return torch::nn::functional::silu(input);
+  }
+};
+
 Qwen3MLP::Qwen3MLP(int hidden_size, int intermediate_size) {
   this->gate_proj = register_module("gate_proj", torch::nn::Linear(
     torch::nn::LinearOptions(hidden_size, intermediate_size).bias(false)
@@ -197,6 +212,11 @@ Qwen3MLP::Qwen3MLP(int hidden_size, int intermediate_size) {
 
 Qwen3MLP::~Qwen3MLP() {
 }
+  
+torch::Tensor Qwen3MLP::forward(const torch::Tensor& x) {
+  SiLUActivation silu;
+  return this->down_proj(silu.forward(this->gate_proj(x)) * this->up_proj(x));
+}
 
 // ============ Decoder Layer ============
 Qwen3DecoderLayer::Qwen3DecoderLayer(int hidden_size, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps) {
@@ -207,6 +227,42 @@ Qwen3DecoderLayer::Qwen3DecoderLayer(int hidden_size, int num_heads, int num_kv_
 }
 
 Qwen3DecoderLayer::~Qwen3DecoderLayer() {
+}
+
+torch::Tensor Qwen3DecoderLayer::forward(
+  const torch::Tensor& hidden_states,
+  const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
+  const std::optional<torch::Tensor>& attention_mask
+  ) {
+  //LOG(INFO) << "Qwen3DecoderLayer::forward layer_norm Input [" << format_tensor(hidden_states) << "]";
+  auto hidden_states_new = this->input_layernorm->forward(hidden_states);
+  //LOG(INFO) << "Qwen3DecoderLayer::forward layer_norm Input2 [" << format_tensor(hidden_states) << "]";
+  //LOG(INFO) << "Qwen3DecoderLayer::forward layer_norm Output [" << format_tensor(hidden_states_new) << "]";
+  
+  // Self Attention
+  //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn hidden_states_new [" << format_tensor(hidden_states_new) << "]";
+  //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn position_embeddings_cos [" << format_tensor(std::get<0>(position_embeddings)) << "]";
+  //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn position_embeddings_sin [" << format_tensor(std::get<1>(position_embeddings)) << "]";
+  //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn attention_mask [" << format_tensor(attention_mask.value()) << "]";
+  torch::Tensor attn_weights;
+  std::tie(hidden_states_new, attn_weights) = this->self_attn->forward(
+    hidden_states_new,
+    position_embeddings,
+    attention_mask
+    );
+  //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn attn_output [" << format_tensor(hidden_states_new) << "]";
+  //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn attn_weights [" << format_tensor(attn_weights) << "]";
+  //LOG(INFO) << "Qwen3DecoderLayer::forward post_norm ori [" << format_tensor(hidden_states) << "]";
+  hidden_states_new = hidden_states + hidden_states_new;
+  
+  // Fully Connected
+  auto residual = hidden_states_new;
+  //LOG(INFO) << "Qwen3DecoderLayer::forward post_norm Input [" << format_tensor(hidden_states_new) << "]";
+  hidden_states_new = this->post_attention_layernorm->forward(hidden_states_new);
+  //LOG(INFO) << "Qwen3DecoderLayer::forward post_norm Output [" << format_tensor(hidden_states_new) << "]";
+  hidden_states_new = this->mlp->forward(hidden_states_new);
+  hidden_states_new = residual + hidden_states_new;
+  return hidden_states_new;
 }
 
 // ============ Model ============

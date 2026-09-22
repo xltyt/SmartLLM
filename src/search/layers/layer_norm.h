@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.07.20 17:19:05
+ * Last modified: 2026.09.22 10:01:21
  *
 \****************************************************/
 
@@ -17,7 +17,7 @@ public:
   RMSNorm(int hidden_size, float eps = 1e-6);
   virtual ~RMSNorm();
 	torch::Tensor forward(torch::Tensor x);
-  std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x, torch::Tensor residual);
+  //std::tuple<torch::Tensor, torch::Tensor> forward(torch::Tensor x, torch::Tensor residual);
   
 	void set_weight(const torch::Tensor& new_weight) {
 		_weight.data() = new_weight.clone();
@@ -27,8 +27,8 @@ public:
 	}
 
 private:
-	torch::Tensor rms_forward(torch::Tensor x);
-	std::tuple<torch::Tensor, torch::Tensor> add_rms_forward(torch::Tensor x, torch::Tensor residual);
+	//torch::Tensor rms_forward(torch::Tensor x);
+	//std::tuple<torch::Tensor, torch::Tensor> add_rms_forward(torch::Tensor x, torch::Tensor residual);
 
 private:
   torch::Tensor _weight;

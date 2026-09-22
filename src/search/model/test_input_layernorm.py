@@ -29,6 +29,6 @@ with torch.inference_mode():
 #  captured["norm_input"] = hidden_states
 #  captured["norm_output"] = manual_norm_output
 
-torch.save({"ids": ids, "input": captured["norm_input"], "ref": captured["norm_output"]}, "test_input_layernorm_0.pt")
+torch.save({"ids": ids, "input": captured["norm_input"], "ref": captured["norm_output"]}, "test_input_layernorm_%d.pt" % LAYER_IDX)
 
 # vim: set expandtab ts=4 sw=4 sts=4:

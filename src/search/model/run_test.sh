@@ -21,4 +21,10 @@ python ${CUR_DIR}/test_input_layernorm.py 0
 python ${CUR_DIR}/test_self_attn.py 0
 ./test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayerAttn0
 
+python ${CUR_DIR}/test_layer.py 0
+./test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayer0
+
+python ${CUR_DIR}/test_layer.py 1
+./test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayer1
+
 # vim: set expandtab ts=4 sw=4 sts=4:

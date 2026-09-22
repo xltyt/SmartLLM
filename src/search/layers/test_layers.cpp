@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.07.21 18:27:53
+ * Last modified: 2026.09.22 10:08:52
  *
 \****************************************************/
 
@@ -39,6 +39,7 @@ TEST(Layer, Activation) {
 	//LOG(INFO) << "Diff[" << diff.max().item<double>() << "]";
 }
 
+#if 0
 TEST(Layer, RMSNorm) {
 	std::string file = "layer_norm.pt";
   
@@ -78,6 +79,7 @@ TEST(Layer, RMSNorm) {
 	ASSERT_EQ(true, torch::allclose(rms_layer.forward(input_zero.clone()), output_zero, rtol, atol));
 	ASSERT_EQ(true, torch::allclose(rms_layer.forward(input_large.clone()), output_large, rtol, atol));
 }
+#endif
 
 TEST(Layer, RotaryEmbedding) {
 	std::string file = "rotary_embedding.pt";

@@ -38,7 +38,8 @@ def attn_hook(module, args, kwargs, output):
   captured["attention_mask"] = kwargs["attention_mask"].detach().clone()
   captured["output_attn_output"] = output[0].detach()
   captured["output_attn_weights"] = output[1].detach()
-handle = target_layer.self_attn.register_forward_hook(attn_hook, with_kwargs=True)
+target_layer.self_attn.register_forward_hook(attn_hook, with_kwargs=True)
+
 with torch.inference_mode():
   _ = model(input_ids=ids, use_cache=False)
 
@@ -50,6 +51,6 @@ torch.save({
   "attention_mask": captured["attention_mask"],
   "output_attn_output": captured["output_attn_output"],
   "output_attn_weights": captured["output_attn_weights"],
-  }, "test_self_attn_0.pt")
+  }, "test_self_attn_%d.pt" % LAYER_IDX)
 
 # vim: set expandtab ts=4 sw=4 sts=4:

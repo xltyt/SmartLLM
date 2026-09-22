@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2020 All Rights Reserved
- * Last modified: 2026.09.21 17:41:44
+ * Last modified: 2026.09.21 19:50:50
  *
 \****************************************************/
 
@@ -43,6 +43,9 @@ class Qwen3MLP : public torch::nn::Module {
 public:
   Qwen3MLP(int hidden_size, int intermediate_size);
   virtual ~Qwen3MLP();
+  
+public:  
+  torch::Tensor forward(const torch::Tensor& x);
 
 private:
   torch::nn::Linear gate_proj{nullptr};
@@ -54,6 +57,13 @@ class Qwen3DecoderLayer : public torch::nn::Module {
 public:
   Qwen3DecoderLayer(int hidden_size, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps);
   virtual ~Qwen3DecoderLayer();
+
+public:  
+  torch::Tensor forward(
+    const torch::Tensor& hidden_states,
+    const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
+    const std::optional<torch::Tensor>& attention_mask
+    );
 
 public:
   std::shared_ptr<RMSNorm> input_layernorm{nullptr};

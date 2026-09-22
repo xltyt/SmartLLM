@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.07.21 15:30:29
+ * Last modified: 2026.09.22 10:07:43
  *
 \****************************************************/
 
@@ -16,9 +16,15 @@ RMSNorm::~RMSNorm() {
 }
 
 torch::Tensor RMSNorm::forward(torch::Tensor x) {
-	return rms_forward(x);
+	//return rms_forward(x);
+	auto input_dtype = x.dtype();
+	auto x_f32 = x.to(torch::kFloat32);
+	auto variance = x_f32.pow(2).mean(-1, true);
+  auto x_normed = x_f32 * torch::rsqrt(variance + _eps);
+  return _weight * x_normed.to(input_dtype);
 }
 
+#if 0
 std::tuple<torch::Tensor, torch::Tensor> RMSNorm::forward(torch::Tensor x, torch::Tensor residual) {
 	return add_rms_forward(x, residual);
 }
@@ -41,5 +47,6 @@ std::tuple<torch::Tensor, torch::Tensor> RMSNorm::add_rms_forward(torch::Tensor 
 	x = x.to(orig_dtype).mul_(_weight);
 	return std::make_tuple(x, new_residual);
 }
+#endif
 
 /* vim: set expandtab nu ts=2 sw=2 sts=2: */

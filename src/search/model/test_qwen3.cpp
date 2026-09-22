@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.21 19:17:10
+ * Last modified: 2026.09.22 10:35:33
  *
 \****************************************************/
 
@@ -102,7 +102,7 @@ TEST(Model, Qwen3ModelLayerInputLayer0) {
 	auto input = data.at("input").toTensor();
 	auto ref = data.at("ref").toTensor();
   
-  auto out = ((Qwen3DecoderLayer *)_model->model->layers[0].get())->input_layernorm->forward(ids);
+  auto out = ((Qwen3DecoderLayer *)_model->model->layers[0].get())->input_layernorm->forward(input);
   double rtol = 1e-5;
 	double atol = 1e-5;
 	ASSERT_EQ(true, check_close("out", out, ref, rtol, atol));
@@ -134,24 +134,77 @@ TEST(Model, Qwen3ModelLayerAttn0) {
 }
 
 TEST(Model, Qwen3ModelLayer0) {
+  InitModel();
+  
+  std::string content;
+  mycommon::file_read("./test_layer_0.pt", content);
+  torch::IValue ivalue = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end()));
+  if (!ivalue.isGenericDict()) {
+    LOG(WARNING) << "Loaded data is not a dictionary!";
+    ASSERT_EQ(true, false);
+  }
+	auto data = ivalue.toGenericDict();
+	auto ids = data.at("ids").toTensor();
+	auto hidden_states = data.at("norm_input").toTensor();
+	auto position_embeddings = std::make_tuple(data.at("position_embeddings_cos").toTensor(), data.at("position_embeddings_sin").toTensor());
+	auto attention_mask = data.at("attention_mask").toTensor();
+	auto ref_attn_output = data.at("attn_output").toTensor();
+	auto ref_layer_output = data.at("layer_output").toTensor();
+  
+  //LOG(INFO) << "Test layer_norm Input [" << format_tensor(data.at("norm_input").toTensor()) << "]";
+  //LOG(INFO) << "Test layer_norm Output [" << format_tensor(data.at("norm_output").toTensor()) << "]";
+  //LOG(INFO) << "Test self_attn hidden_states [" << format_tensor(data.at("hidden_states").toTensor()) << "]";
+  //LOG(INFO) << "Test self_attn position_embeddings_cos [" << format_tensor(data.at("position_embeddings_cos").toTensor()) << "]";
+  //LOG(INFO) << "Test self_attn position_embeddings_sin [" << format_tensor(data.at("position_embeddings_sin").toTensor()) << "]";
+  //LOG(INFO) << "Test self_attn attention_mask [" << format_tensor(data.at("attention_mask").toTensor()) << "]";
+  //LOG(INFO) << "Test self_attn attn_output [" << format_tensor(data.at("attn_output").toTensor()) << "]";
+  //LOG(INFO) << "Test self_attn attn_weights [" << format_tensor(data.at("attn_weights").toTensor()) << "]";
+  //LOG(INFO) << "Test post_norm Input [" << format_tensor(data.at("post_norm_input").toTensor()) << "]";
+  //LOG(INFO) << "Test post_norm Output [" << format_tensor(data.at("post_norm_output").toTensor()) << "]";
+  
+  auto layer_output = ((Qwen3DecoderLayer *)_model->model->layers[0].get())->forward(hidden_states, position_embeddings, attention_mask);
+  //LOG(INFO) << "Out[" << format_tensor(layer_output) << "]";
+  double rtol = 1e-5;
+	double atol = 1e-5;
+	ASSERT_EQ(true, check_close("layer_output", layer_output, ref_layer_output, rtol, atol));
 }
 
-TEST(Model, Qwen3ModelLayerInputLayer13) {
+TEST(Model, Qwen3ModelLayer1) {
+  InitModel();
+  
+  std::string content;
+  mycommon::file_read("./test_layer_0.pt", content);
+  torch::IValue ivalue = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end()));
+  if (!ivalue.isGenericDict()) {
+    LOG(WARNING) << "Loaded data is not a dictionary!";
+    ASSERT_EQ(true, false);
+  }
+	auto data = ivalue.toGenericDict();
+	auto ids = data.at("ids").toTensor();
+	auto hidden_states = data.at("norm_input").toTensor();
+	auto position_embeddings = std::make_tuple(data.at("position_embeddings_cos").toTensor(), data.at("position_embeddings_sin").toTensor());
+	auto attention_mask = data.at("attention_mask").toTensor();
+	auto ref_attn_output_0 = data.at("attn_output").toTensor();
+	auto ref_layer_output_0 = data.at("layer_output").toTensor();
+  
+  mycommon::file_read("./test_layer_1.pt", content);
+  torch::IValue ivalue_1 = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end()));
+  if (!ivalue_1.isGenericDict()) {
+    LOG(WARNING) << "Loaded data is not a dictionary!";
+    ASSERT_EQ(true, false);
+  }
+	auto data_1 = ivalue_1.toGenericDict();
+	auto ref_layer_output_1 = data_1.at("layer_output").toTensor();
+  
+  auto layer_output_0 = ((Qwen3DecoderLayer *)_model->model->layers[0].get())->forward(hidden_states, position_embeddings, attention_mask);
+  auto layer_output_1 = ((Qwen3DecoderLayer *)_model->model->layers[1].get())->forward(layer_output_0, position_embeddings, attention_mask);
+  
+  double rtol = 1e-5;
+	double atol = 1e-5;
+	ASSERT_EQ(true, check_close("layer_output", layer_output_1, ref_layer_output_1, rtol, atol));
 }
 
-TEST(Model, Qwen3ModelLayerAttn13) {
-}
-
-TEST(Model, Qwen3ModelLayer13) {
-}
-
-TEST(Model, Qwen3ModelLayerInputLayer27) {
-}
-
-TEST(Model, Qwen3ModelLayerAttn27) {
-}
-
-TEST(Model, Qwen3ModelLayer27) {
+TEST(Model, Qwen3Model) {
 }
 
 TEST(Model, Qwen3ModelNorm) {
