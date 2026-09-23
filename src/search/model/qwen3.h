@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2020 All Rights Reserved
- * Last modified: 2026.09.22 15:55:41
+ * Last modified: 2026.09.22 20:09:47
  *
 \****************************************************/
 
@@ -137,7 +137,8 @@ public:
 
 public:
   torch::Tensor forward(
-    const std::vector<int64_t>& input_ids
+    const std::vector<int64_t>& input_ids,
+    int logits_to_keep = 1
     );
 
 public:

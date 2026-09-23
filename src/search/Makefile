@@ -186,7 +186,10 @@ $(TEST_DIR)/$(TEST_MODEL_QWEN3_MODULE_NAME) : \
 	$(OBJS_DIR)/model/test_qwen3.o \
 	$(OBJS_DIR)/model/qwen3.o \
 	$(OBJS_DIR)/layers/layer_norm.o \
-	$(OBJS_DIR)/utils/model_utils.o
+	$(OBJS_DIR)/utils/model_utils.o \
+	$(OBJS_DIR)/token/core_bpe.o \
+	$(OBJS_DIR)/token/tiktoken.o \
+	$(OBJS_DIR)/token/qwen_token.o
 	$(CXX) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -Wl,-rpath=../lib -Wl,-rpath=lib -lgtest
 	$(STRIP) $@
 

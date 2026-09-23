@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.08.15 16:44:35
+ * Last modified: 2026.09.23 11:25:54
  *
 \****************************************************/
 
@@ -35,9 +35,9 @@ QwenToken::QwenToken(const std::string& dir) {
               LOG(WARNING) << "data_gym_to_mergeable_bpe_ranks Load AddToken[" << j << "] Id Empty";
               continue;
             }
-            if (!token_special) {
-              continue;
-            }
+            //if (!token_special) {
+            //  continue;
+            //}
             special_tokens[token_content] = token_id;
             n_vocab++;
           }

@@ -422,10 +422,27 @@ Qwen3ForCausalLM::~Qwen3ForCausalLM() {
 }
   
 torch::Tensor Qwen3ForCausalLM::forward(
-  const std::vector<int64_t>& input_ids
+  const std::vector<int64_t>& input_ids,
+  int logits_to_keep /*= 1*/
   ) {
   auto hidden_states = this->model->forward(input_ids);
-  return this->lm_head(hidden_states);
+  
+  int64_t seq_len = hidden_states.size(1);
+  torch::Tensor target_states;
+  if (logits_to_keep > 0 && logits_to_keep < seq_len) {
+    // 在序列维度 (dim=1) 上切片截取最后的 logits_to_keep 个 Token, 截取后形状为: [batch_size, logits_to_keep, hidden_size]
+    // slice_indices = slice(-logits_to_keep, None) if isinstance(logits_to_keep, int) else logits_to_keep
+    // logits = self.lm_head(hidden_states[:, slice_indices, :])
+    target_states = hidden_states.slice(
+      1,                        // dim
+      seq_len - logits_to_keep, // start
+      seq_len                   // end
+      );
+  }
+  else {
+    target_states = hidden_states;
+  }
+  return this->lm_head(target_states);
 }
 
 /* vim: set expandtab nu ts=2 sw=2 sts=2: */
