@@ -124,6 +124,7 @@ SOURCES += \
   layers/rotary_embedding.o \
   layers/sampler.o \
   model/qwen3.o \
+  model/kv_cache.o \
   token/core_bpe.cpp \
   token/tiktoken.cpp \
   token/qwen_token.cpp \
@@ -185,6 +186,7 @@ $(TEST_DIR)/$(TEST_MODEL_UTILS_MODULE_NAME) : \
 $(TEST_DIR)/$(TEST_MODEL_QWEN3_MODULE_NAME) : \
 	$(OBJS_DIR)/model/test_qwen3.o \
 	$(OBJS_DIR)/model/qwen3.o \
+	$(OBJS_DIR)/model/kv_cache.o \
 	$(OBJS_DIR)/layers/layer_norm.o \
 	$(OBJS_DIR)/utils/model_utils.o \
 	$(OBJS_DIR)/token/core_bpe.o \

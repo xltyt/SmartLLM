@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.23 10:51:23
+ * Last modified: 2026.09.28 22:35:45
  *
 \****************************************************/
 
@@ -12,6 +12,7 @@
 #include <glog/logging.h>
 #include <nlohmann/json.hpp>
 #include <file_utils.h>
+#include <timer.h>
 #include "utils/model_utils.h"
 #include "model/qwen3.h"
 #include "token/qwen_token.h"
@@ -288,7 +289,7 @@ TEST(Model, Qwen3Lm) {
 	auto ref_logits = data.at("logits").toTensor();
 
   std::vector<int64_t> input_ids(ids.data_ptr<int64_t>(), ids.data_ptr<int64_t>() + ids.numel());
-  auto logits = _model->forward(input_ids);
+  auto logits = _model->forward(input_ids, 0);
   double rtol = 1e-4;
 	double atol = 1e-4;
 	ASSERT_EQ(true, check_close("logits", logits, ref_logits, rtol, atol));
@@ -318,6 +319,7 @@ TEST(Model, Qwen3Runner) {
 	//double atol = 1e-4;
 	//ASSERT_EQ(true, check_close("token_ids", token_ids_tensor, ref_output, rtol, atol));
   
+  uint64_t time_start = mycommon::getMilliTime();
   std::vector<int64_t> current_tokens = ref_input_ids;
   for (int step = 0; step < max_new_tokens; ++step) {
     //auto input_ids = torch::from_blob(
@@ -341,6 +343,85 @@ TEST(Model, Qwen3Runner) {
       break;
     }
   }
+  uint64_t time_used = mycommon::getMilliTime() - time_start;
+  LOG(INFO) << "Time[" << time_used << "] Input[" << ref_input_ids.size() << "] Output[" << current_tokens.size() << "]";
+  QwenToken token("/data/Qwen3-0.6B/");
+  std::vector<size_t> run_ids;
+  for (auto _ : current_tokens) {
+    run_ids.push_back(_);
+  }
+  std::string my_text = token.decode(run_ids);
+  LOG(INFO) << my_text;
+  ASSERT_EQ(current_tokens, ref_output_ids);
+}
+
+TEST(Model, Qwen3RunnerCache) {
+  auto config = nlohmann::json::parse(std::ifstream("/data/Qwen3-0.6B/config.json"));
+  int max_seq_len = 2048;
+  int batch_size = 1;
+  KVCache *kv_cache = new KVCache(
+    config["num_hidden_layers"],
+    batch_size,
+    config["num_key_value_heads"],
+    config["head_dim"],
+    max_seq_len
+    );
+  Qwen3ForCausalLM *model = new Qwen3ForCausalLM(
+    config["vocab_size"],
+    config["hidden_size"],
+    config["num_hidden_layers"],
+    config["num_attention_heads"],
+    config["num_key_value_heads"],
+    config["head_dim"],
+    config["intermediate_size"],
+    config["rms_norm_eps"],
+    kv_cache
+    );
+  load_module_from_safetensors(*model, "/data/Qwen3-0.6B/model.safetensors");
+  model->eval();
+  LOG(INFO) << "Model Loaded";
+  
+  std::string content;
+  mycommon::file_read("./test_runner.pt", content);
+  torch::IValue ivalue = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end()));
+  if (!ivalue.isGenericDict()) {
+    LOG(WARNING) << "Loaded data is not a dictionary!";
+    ASSERT_EQ(true, false);
+  }
+	auto data = ivalue.toGenericDict();
+	auto ids = data.at("ids").toTensor();
+	auto max_new_tokens = data.at("max_length").toInt();
+	auto ref_output = data.at("output").toTensor();
+  std::vector<int64_t> ref_output_ids(ref_output.data_ptr<int64_t>(), ref_output.data_ptr<int64_t>() + ref_output.numel());
+  std::vector<int64_t> ref_input_ids(ids.data_ptr<int64_t>(), ids.data_ptr<int64_t>() + ids.numel());
+  std::vector<int64_t> current_tokens = ref_input_ids;
+  // Prefill
+  uint64_t time_start = mycommon::getMilliTime();
+  auto logits = model->forward(
+    ref_input_ids,
+    1,
+    0
+    );
+  uint64_t time_prefill = mycommon::getMilliTime() - time_start;
+  time_start = mycommon::getMilliTime();
+  auto next_token_tensor = torch::argmax(logits.squeeze(0).squeeze(0), /*dim=*/-1);
+  int64_t next_token = next_token_tensor.item<int64_t>();
+  current_tokens.push_back(next_token);
+  // Decode
+  for (int step = 0; step < max_new_tokens; ++step) {
+    LOG(INFO) << "Step[" << step << "] Token[" << next_token << "]";
+    if (next_token == 151643 || next_token == 151645) {
+      LOG(INFO) << "EOS End";
+      break;
+    }
+    int64_t current_pos = ref_input_ids.size() + step;
+    logits = model->forward({next_token}, /*logits_to_keep=*/1, current_pos);
+    next_token_tensor = torch::argmax(logits.squeeze(0).squeeze(0), /*dim=*/-1);
+    next_token = next_token_tensor.item<int64_t>();
+    current_tokens.push_back(next_token);
+  }
+  uint64_t time_decode = mycommon::getMilliTime() - time_start;
+  LOG(INFO) << "Prefill Time[" << time_prefill << "] Decode Time[" << time_decode << "] Input[" << ref_input_ids.size() << "] Output[" << current_tokens.size() << "]";
   QwenToken token("/data/Qwen3-0.6B/");
   std::vector<size_t> run_ids;
   for (auto _ : current_tokens) {

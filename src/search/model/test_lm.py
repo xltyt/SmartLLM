@@ -10,7 +10,15 @@ tok = AutoTokenizer.from_pretrained(name)
 model = AutoModelForCausalLM.from_pretrained(name, torch_dtype=torch.float32, attn_implementation="eager")
 model.eval()
 
-ids = tok("中国的首都是哪里，和美国的首都对比一下", return_tensors="pt").input_ids
+#ids = tok("中国的首都是哪里，和美国的首都对比一下", return_tensors="pt").input_ids
+messages = [{"role": "user", "content": "世界最高峰是哪里，简单介绍一下"}]
+prompt_text = tok.apply_chat_template(
+  messages,
+  tokenize=False,
+  add_generation_prompt=True,
+  enable_thinking=False,
+)
+ids = tok(prompt_text, return_tensors="pt").input_ids
 
 captured = {}
 def lm_hook(module, args, output):
@@ -21,6 +29,7 @@ model.register_forward_hook(lm_hook)
 with torch.inference_mode():
   _ = model(input_ids=ids, use_cache=False)
 
+print(captured["logits"].shape)
 torch.save({
   "ids": ids,
   "logits": captured["logits"],

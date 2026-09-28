@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2020 All Rights Reserved
- * Last modified: 2026.09.22 20:09:47
+ * Last modified: 2026.09.28 22:22:30
  *
 \****************************************************/
 
@@ -11,6 +11,7 @@
 #define C10_USE_GLOG
 #include <torch/torch.h>
 #include "layers/layer_norm.h"
+#include "kv_cache.h"
 
 // Ref:
 //  transformers/models/qwen3/modeling_qwen3.py
@@ -18,13 +19,22 @@
 
 class Qwen3Attention : public torch::nn::Module {
 public:
-  Qwen3Attention(int hidden_size, int num_heads, int num_kv_heads, int head_dim, float rms_norm_eps);
+  Qwen3Attention(
+    int hidden_size,
+    int num_heads,
+    int num_kv_heads,
+    int head_dim,
+    float rms_norm_eps,
+    KVCache *kv_cache = NULL
+    );
   virtual ~Qwen3Attention();
 
   std::tuple<torch::Tensor, torch::Tensor> forward(
     const torch::Tensor& hidden_states,
     const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
-    const std::optional<torch::Tensor>& attention_mask
+    const std::optional<torch::Tensor>& attention_mask,
+    int start_pos = 0,
+    int layer_idx = -1
     );
   
 private:  
@@ -37,6 +47,7 @@ private:
   int _head_dim = 0;
 	double _scaling = 0;
 	int _num_key_value_groups = 0;
+  KVCache *_kv_cache = NULL;
 };
 
 class Qwen3MLP : public torch::nn::Module {
@@ -55,14 +66,24 @@ private:
 
 class Qwen3DecoderLayer : public torch::nn::Module {
 public:
-  Qwen3DecoderLayer(int hidden_size, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps);
+  Qwen3DecoderLayer(
+    int hidden_size,
+    int num_heads,
+    int num_kv_heads,
+    int head_dim,
+    int intermediate_size,
+    float rms_norm_eps,
+    KVCache *kv_cache = NULL
+    );
   virtual ~Qwen3DecoderLayer();
 
 public:  
   torch::Tensor forward(
     const torch::Tensor& hidden_states,
     const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
-    const std::optional<torch::Tensor>& attention_mask
+    const std::optional<torch::Tensor>& attention_mask,
+    int start_pos = 0,
+    int layer_idx = -1
     );
 
 public:
@@ -112,15 +133,27 @@ private:
 
 class Qwen3Model : public torch::nn::Module {
 public:
-  Qwen3Model(int vocab_size, int hidden_size, int num_layers, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps);
+  Qwen3Model(
+    int vocab_size,
+    int hidden_size,
+    int num_layers,
+    int num_heads,
+    int num_kv_heads,
+    int head_dim,
+    int intermediate_size,
+    float rms_norm_eps,
+    KVCache *kv_cache = NULL
+    );
   virtual ~Qwen3Model();
   
 public:
   std::tuple<torch::Tensor, torch::Tensor> prepare(
-    const std::vector<int64_t>& input_ids
+    const std::vector<int64_t>& input_ids,
+    int start_pos = 0
     );
   torch::Tensor forward(
-    const std::vector<int64_t>& input_ids
+    const std::vector<int64_t>& input_ids,
+    int start_pos = 0
     );
 
 public:
@@ -132,13 +165,24 @@ public:
 
 class Qwen3ForCausalLM : public torch::nn::Module {
 public:
-  Qwen3ForCausalLM(int vocab_size, int hidden_size, int num_layers, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps);
+  Qwen3ForCausalLM(
+    int vocab_size,
+    int hidden_size,
+    int num_layers,
+    int num_heads,
+    int num_kv_heads,
+    int head_dim,
+    int intermediate_size,
+    float rms_norm_eps,
+    KVCache *kv_cache = NULL
+    );
   virtual ~Qwen3ForCausalLM();
 
 public:
   torch::Tensor forward(
     const std::vector<int64_t>& input_ids,
-    int logits_to_keep = 1
+    int logits_to_keep = 1,
+    int start_pos = 0
     );
 
 public:

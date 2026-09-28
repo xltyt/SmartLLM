@@ -41,4 +41,6 @@ python ${CUR_DIR}/test_lm.py
 python ${CUR_DIR}/test_runner.py
 ./test_model_qwen3 --gtest_filter=Model.Qwen3Runner
 
+./test_model_qwen3 --gtest_filter=Model.Qwen3RunnerCache
+
 # vim: set expandtab ts=4 sw=4 sts=4:

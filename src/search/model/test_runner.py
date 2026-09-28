@@ -4,6 +4,7 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import sys
+import time
 
 name = "/data/Qwen3-0.6B"
 tok = AutoTokenizer.from_pretrained(name)
@@ -21,7 +22,10 @@ prompt_text = tok.apply_chat_template(
 )
 ids = tok(prompt_text, return_tensors="pt").input_ids
 
+time_start = time.time()
 generate_ids = model.generate(ids, max_length=200, do_sample=False)
+time_used = time.time() - time_start
+print(f"Time[{time_used}]")
 text = tok.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
 print(text)
 

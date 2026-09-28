@@ -5,7 +5,14 @@
 #include "utils/model_utils.h"
 
 // ============ Attention ============
-Qwen3Attention::Qwen3Attention(int hidden_size, int num_heads, int num_kv_heads, int head_dim, float rms_norm_eps) {
+Qwen3Attention::Qwen3Attention(
+  int hidden_size,
+  int num_heads,
+  int num_kv_heads,
+  int head_dim,
+  float rms_norm_eps,
+  KVCache *kv_cache /*= NULL*/
+  ) {
   //int head_dim = hidden_size / num_heads;
   //LOG(INFO) << "Qwen3Attention hidden_size[" << hidden_size << "] num_heads[" << num_heads << "] head_dim[" << head_dim << "]";
   this->q_proj = register_module("q_proj", torch::nn::Linear(
@@ -25,6 +32,7 @@ Qwen3Attention::Qwen3Attention(int hidden_size, int num_heads, int num_kv_heads,
   _head_dim = head_dim;
   _scaling = std::pow(head_dim, -0.5);
   _num_key_value_groups = num_heads / num_kv_heads;
+  _kv_cache = kv_cache;
 }
 
 Qwen3Attention::~Qwen3Attention() {
@@ -140,7 +148,9 @@ inline std::pair<torch::Tensor, torch::Tensor> eager_attention_forward(
 std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
   const torch::Tensor& hidden_states,
   const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
-  const std::optional<torch::Tensor>& attention_mask
+  const std::optional<torch::Tensor>& attention_mask,
+  int start_pos /*= 0*/,
+  int layer_idx /*= -1*/
   ) {
 
   int64_t batch_size = hidden_states.size(0);
@@ -166,7 +176,11 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
     position_embeddings_cos,
     position_embeddings_sin
     );
-        
+  
+  if (_kv_cache != NULL) {
+    std::tie(key_states, value_states) = _kv_cache->update(layer_idx, key_states, value_states, start_pos);
+  }
+
   auto [attn_output, attn_weights] = eager_attention_forward(
     query_states,
     key_states,
@@ -219,9 +233,24 @@ torch::Tensor Qwen3MLP::forward(const torch::Tensor& x) {
 }
 
 // ============ Decoder Layer ============
-Qwen3DecoderLayer::Qwen3DecoderLayer(int hidden_size, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps) {
+Qwen3DecoderLayer::Qwen3DecoderLayer(
+  int hidden_size,
+  int num_heads,
+  int num_kv_heads,
+  int head_dim,
+  int intermediate_size,
+  float rms_norm_eps,
+  KVCache *kv_cache /*= NULL*/
+  ) {
   this->input_layernorm = register_module("input_layernorm", std::make_shared<RMSNorm>(hidden_size, rms_norm_eps));
-  this->self_attn = register_module("self_attn", std::make_shared<Qwen3Attention>(hidden_size, num_heads, num_kv_heads, head_dim, rms_norm_eps));
+  this->self_attn = register_module("self_attn", std::make_shared<Qwen3Attention>(
+    hidden_size,
+    num_heads,
+    num_kv_heads,
+    head_dim,
+    rms_norm_eps,
+    kv_cache
+    ));
   this->post_attention_layernorm = register_module("post_attention_layernorm", std::make_shared<RMSNorm>(hidden_size, rms_norm_eps));
   this->mlp = register_module("mlp", std::make_shared<Qwen3MLP>(hidden_size, intermediate_size));
 }
@@ -232,7 +261,9 @@ Qwen3DecoderLayer::~Qwen3DecoderLayer() {
 torch::Tensor Qwen3DecoderLayer::forward(
   const torch::Tensor& hidden_states,
   const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
-  const std::optional<torch::Tensor>& attention_mask
+  const std::optional<torch::Tensor>& attention_mask,
+  int start_pos /*= 0*/,
+  int layer_idx /*= -1*/
   ) {
   //LOG(INFO) << "Qwen3DecoderLayer::forward layer_norm Input [" << format_tensor(hidden_states) << "]";
   auto hidden_states_new = this->input_layernorm->forward(hidden_states);
@@ -248,7 +279,9 @@ torch::Tensor Qwen3DecoderLayer::forward(
   std::tie(hidden_states_new, attn_weights) = this->self_attn->forward(
     hidden_states_new,
     position_embeddings,
-    attention_mask
+    attention_mask,
+    start_pos,
+    layer_idx
     );
   //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn attn_output [" << format_tensor(hidden_states_new) << "]";
   //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn attn_weights [" << format_tensor(attn_weights) << "]";
@@ -338,7 +371,17 @@ inline torch::Tensor make_causal_mask(
   return mask.unsqueeze(0).unsqueeze(0);
 }
 
-Qwen3Model::Qwen3Model(int vocab_size, int hidden_size, int num_layers, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps) {
+Qwen3Model::Qwen3Model(
+  int vocab_size,
+  int hidden_size,
+  int num_layers,
+  int num_heads,
+  int num_kv_heads,
+  int head_dim,
+  int intermediate_size,
+  float rms_norm_eps,
+  KVCache *kv_cache /*= NULL*/
+  ) {
   this->embed_tokens = register_module("embed_tokens", torch::nn::Embedding(vocab_size, hidden_size));
 
   this->layers = register_module("layers", torch::nn::ModuleList());
@@ -349,7 +392,8 @@ Qwen3Model::Qwen3Model(int vocab_size, int hidden_size, int num_layers, int num_
       num_kv_heads,
       head_dim,
       intermediate_size,
-      rms_norm_eps
+      rms_norm_eps,
+      kv_cache
       ));
   }
 
@@ -362,7 +406,8 @@ Qwen3Model::~Qwen3Model() {
 }
 
 std::tuple<torch::Tensor, torch::Tensor> Qwen3Model::prepare(
-  const std::vector<int64_t>& input_ids
+  const std::vector<int64_t>& input_ids,
+  int start_pos /*= 0*/
   ) {
 
   torch::Tensor tensor_input_ids = torch::from_blob(
@@ -374,7 +419,7 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Model::prepare(
 
   int64_t seq_len = inputs_embeds.size(1);
 
-  auto position_ids = torch::arange(seq_len, torch::device(inputs_embeds.device()).dtype(torch::kInt64)) + 0;
+  auto position_ids = torch::arange(seq_len, torch::device(inputs_embeds.device()).dtype(torch::kInt64)) + start_pos;
 
   position_ids = position_ids.unsqueeze(0);
 
@@ -382,18 +427,29 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Model::prepare(
 }
 
 torch::Tensor Qwen3Model::forward(
-  const std::vector<int64_t>& input_ids
+  const std::vector<int64_t>& input_ids,
+  int start_pos /*= 0*/
   ) {
   
-  auto [hidden_states, position_ids] = prepare(input_ids);
+  auto [hidden_states, position_ids] = prepare(input_ids, start_pos);
   
   auto position_embeddings = this->rotary_emb->forward(hidden_states, position_ids);
   
-  auto attention_mask = make_causal_mask(input_ids.size());
+  bool is_decode = (input_ids.size() == 1 && start_pos > 0);
+
+  LOG(INFO) << "Decode[" << is_decode << "]";
+
+  std::optional<torch::Tensor> attention_mask = is_decode ? std::nullopt : std::make_optional(make_causal_mask(input_ids.size()));
   
   for (int i = 0; i < this->layers->size(); i++) {
     Qwen3DecoderLayer *layer = (Qwen3DecoderLayer *)this->layers[i].get();
-    hidden_states = layer->forward(hidden_states, position_embeddings, attention_mask);
+    hidden_states = layer->forward(
+      hidden_states,
+      position_embeddings,
+      attention_mask,
+      start_pos,
+      i
+      );
   }
   hidden_states = this->norm->forward(hidden_states);
   
@@ -401,7 +457,17 @@ torch::Tensor Qwen3Model::forward(
 }
 
 // ============ Top-level Model ============
-Qwen3ForCausalLM::Qwen3ForCausalLM::Qwen3ForCausalLM(int vocab_size, int hidden_size, int num_layers, int num_heads, int num_kv_heads, int head_dim, int intermediate_size, float rms_norm_eps) {
+Qwen3ForCausalLM::Qwen3ForCausalLM(
+  int vocab_size,
+  int hidden_size,
+  int num_layers,
+  int num_heads,
+  int num_kv_heads,
+  int head_dim,
+  int intermediate_size,
+  float rms_norm_eps,
+  KVCache *kv_cache /*= NULL*/
+  ) {
   this->model = register_module("model", std::make_shared<Qwen3Model>(
     vocab_size,
     hidden_size,
@@ -410,7 +476,8 @@ Qwen3ForCausalLM::Qwen3ForCausalLM::Qwen3ForCausalLM(int vocab_size, int hidden_
     num_kv_heads,
     head_dim,
     intermediate_size,
-    rms_norm_eps
+    rms_norm_eps,
+    kv_cache
     ));
 
   this->lm_head = register_module("lm_head", torch::nn::Linear(
@@ -423,9 +490,14 @@ Qwen3ForCausalLM::~Qwen3ForCausalLM() {
   
 torch::Tensor Qwen3ForCausalLM::forward(
   const std::vector<int64_t>& input_ids,
-  int logits_to_keep /*= 1*/
+  int logits_to_keep /*= 1*/,
+  int start_pos /*= 0*/
   ) {
-  auto hidden_states = this->model->forward(input_ids);
+  torch::NoGradGuard no_grad;
+  auto hidden_states = this->model->forward(
+    input_ids,
+    start_pos
+    );
   
   int64_t seq_len = hidden_states.size(1);
   torch::Tensor target_states;
