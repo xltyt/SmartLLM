@@ -2,6 +2,7 @@
 #include "safetensors.hh"
 #include <fstream>
 #include <vector>
+#include <timer.h>
 #include "utils/model_utils.h"
 
 // ============ Attention ============
@@ -265,8 +266,11 @@ torch::Tensor Qwen3DecoderLayer::forward(
   int start_pos /*= 0*/,
   int layer_idx /*= -1*/
   ) {
+  //uint64_t time_start = mycommon::getMilliTime();
   //LOG(INFO) << "Qwen3DecoderLayer::forward layer_norm Input [" << format_tensor(hidden_states) << "]";
   auto hidden_states_new = this->input_layernorm->forward(hidden_states);
+  //uint64_t time_used = mycommon::getMilliTime() - time_start;
+  //LOG(INFO) << "input layernorm Time[" << time_used << "]";
   //LOG(INFO) << "Qwen3DecoderLayer::forward layer_norm Input2 [" << format_tensor(hidden_states) << "]";
   //LOG(INFO) << "Qwen3DecoderLayer::forward layer_norm Output [" << format_tensor(hidden_states_new) << "]";
   
@@ -275,6 +279,7 @@ torch::Tensor Qwen3DecoderLayer::forward(
   //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn position_embeddings_cos [" << format_tensor(std::get<0>(position_embeddings)) << "]";
   //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn position_embeddings_sin [" << format_tensor(std::get<1>(position_embeddings)) << "]";
   //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn attention_mask [" << format_tensor(attention_mask.value()) << "]";
+  //time_start = mycommon::getMilliTime();
   torch::Tensor attn_weights;
   std::tie(hidden_states_new, attn_weights) = this->self_attn->forward(
     hidden_states_new,
@@ -283,6 +288,8 @@ torch::Tensor Qwen3DecoderLayer::forward(
     start_pos,
     layer_idx
     );
+  //time_used = mycommon::getMilliTime() - time_start;
+  //LOG(INFO) << "attn Time[" << time_used << "]";
   //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn attn_output [" << format_tensor(hidden_states_new) << "]";
   //LOG(INFO) << "Qwen3DecoderLayer::forward self_attn attn_weights [" << format_tensor(attn_weights) << "]";
   //LOG(INFO) << "Qwen3DecoderLayer::forward post_norm ori [" << format_tensor(hidden_states) << "]";
@@ -290,10 +297,16 @@ torch::Tensor Qwen3DecoderLayer::forward(
   
   // Fully Connected
   auto residual = hidden_states_new;
+  //time_start = mycommon::getMilliTime();
   //LOG(INFO) << "Qwen3DecoderLayer::forward post_norm Input [" << format_tensor(hidden_states_new) << "]";
   hidden_states_new = this->post_attention_layernorm->forward(hidden_states_new);
+  //time_used = mycommon::getMilliTime() - time_start;
+  //LOG(INFO) << "post layer norm Time[" << time_used << "]";
+  //time_start = mycommon::getMilliTime();
   //LOG(INFO) << "Qwen3DecoderLayer::forward post_norm Output [" << format_tensor(hidden_states_new) << "]";
   hidden_states_new = this->mlp->forward(hidden_states_new);
+  //time_used = mycommon::getMilliTime() - time_start;
+  //LOG(INFO) << "mlp Time[" << time_used << "]";
   hidden_states_new = residual + hidden_states_new;
   return hidden_states_new;
 }
@@ -433,14 +446,18 @@ torch::Tensor Qwen3Model::forward(
   
   auto [hidden_states, position_ids] = prepare(input_ids, start_pos);
   
+  //uint64_t time_start = mycommon::getMilliTime();
   auto position_embeddings = this->rotary_emb->forward(hidden_states, position_ids);
+  //uint64_t time_used = mycommon::getMilliTime() - time_start;
+  //LOG(INFO) << "rotary_emb Time[" << time_used << "]";
   
   bool is_decode = (input_ids.size() == 1 && start_pos > 0);
 
-  LOG(INFO) << "Decode[" << is_decode << "]";
+  //LOG(INFO) << "Decode[" << is_decode << "]";
 
   std::optional<torch::Tensor> attention_mask = is_decode ? std::nullopt : std::make_optional(make_causal_mask(input_ids.size()));
   
+  //time_start = mycommon::getMilliTime();
   for (int i = 0; i < this->layers->size(); i++) {
     Qwen3DecoderLayer *layer = (Qwen3DecoderLayer *)this->layers[i].get();
     hidden_states = layer->forward(
@@ -451,6 +468,8 @@ torch::Tensor Qwen3Model::forward(
       i
       );
   }
+  //time_used = mycommon::getMilliTime() - time_start;
+  //LOG(INFO) << "layer Time[" << time_used << "]";
   hidden_states = this->norm->forward(hidden_states);
   
   return hidden_states;

@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.28 22:35:45
+ * Last modified: 2026.09.29 12:05:12
  *
 \****************************************************/
 
@@ -34,6 +34,14 @@ void InitModel() {
     config["rms_norm_eps"]
     );
   load_module_from_safetensors(*_model, "/data/Qwen3-0.6B/model.safetensors");
+  {
+    torch::NoGradGuard no_grad;
+    for (auto& param : _model->parameters()) {
+      if (!param.is_contiguous()) {
+        param.data() = param.data().contiguous();
+      }
+    }
+  }
   _model->eval();
   LOG(INFO) << "Model Loaded";
 }
@@ -62,6 +70,14 @@ TEST(Model, Qwen3) {
     rms_norm_eps
     );
   load_module_from_safetensors(model, "/data/Qwen3-0.6B/model.safetensors");
+  {
+    torch::NoGradGuard no_grad;
+    for (auto& param : model.parameters()) {
+      if (!param.is_contiguous()) {
+        param.data() = param.data().contiguous();
+      }
+    }
+  }
   model.eval();
   for (const auto& p : model.named_parameters()) {
     LOG(INFO) << "Key[" << p.key() << "] Shape[" << p.value().sizes() << "]";
@@ -356,6 +372,11 @@ TEST(Model, Qwen3Runner) {
 }
 
 TEST(Model, Qwen3RunnerCache) {
+  LOG(INFO) << "num_threads: " << torch::get_num_threads();
+  LOG(INFO) << "num_interop_threads: " << torch::get_num_interop_threads();
+  LOG(INFO) << "MKL available: " << at::hasMKL();
+  LOG(INFO) << "MKL-DNN available: " << at::hasMKLDNN();
+
   auto config = nlohmann::json::parse(std::ifstream("/data/Qwen3-0.6B/config.json"));
   int max_seq_len = 2048;
   int batch_size = 1;
@@ -378,6 +399,14 @@ TEST(Model, Qwen3RunnerCache) {
     kv_cache
     );
   load_module_from_safetensors(*model, "/data/Qwen3-0.6B/model.safetensors");
+  {
+    torch::NoGradGuard no_grad;
+    for (auto& param : model->parameters()) {
+      if (!param.is_contiguous()) {
+        param.data() = param.data().contiguous();
+      }
+    }
+  }
   model->eval();
   LOG(INFO) << "Model Loaded";
   

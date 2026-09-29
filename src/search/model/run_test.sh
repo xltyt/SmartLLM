@@ -9,7 +9,8 @@ set -x
 
 source /data/local/conda_env.sh
 conda activate test
-export LD_LIBRARY_PATH=${ROOT_DIR}/amd64/local/torch/gpu/12.2/lib/:$LD_LIBRARY_PATH 
+#export LD_LIBRARY_PATH=${ROOT_DIR}/amd64/local/torch/gpu/12.2/lib/:$LD_LIBRARY_PATH 
+export LD_LIBRARY_PATH=${ROOT_DIR}/amd64/local/torch/cpu/lib/:$LD_LIBRARY_PATH 
 cd ${ROOT_DIR}/amd64/test/
 
 python ${CUR_DIR}/test_emb.py

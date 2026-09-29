@@ -156,11 +156,12 @@ endif
   
 ifeq ($(MODE),gpu)
   TEST_LAYERS_MODULE_NAME=test_layers_gpu_$(CUDA_VERSION)
+  TEST_MODEL_QWEN3_MODULE_NAME=test_model_qwen3_gpu_$(CUDA_VERSION)
 else
   TEST_LAYERS_MODULE_NAME=test_layers
+  TEST_MODEL_QWEN3_MODULE_NAME=test_model_qwen3
 endif
 TEST_MODEL_UTILS_MODULE_NAME=test_module_utils
-TEST_MODEL_QWEN3_MODULE_NAME=test_model_qwen3
 
 test: \
 	$(TEST_DIR)/$(TEST_LAYERS_MODULE_NAME) \

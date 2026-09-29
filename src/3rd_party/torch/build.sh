@@ -85,6 +85,9 @@ if [ ! -d $DST/torch/cpu/lib ]; then
     #cp lib/libonnx.a $DST/torch/cpu/lib/
     #cp lib/libclog.a $DST/torch/cpu/lib/
   else
+    source $DST/intel/setvars.sh
+    source $DST/intel/mkl/latest/env/vars.sh
+    echo $MKLROOT 
     cmake \
     -DUSE_CUDA=False \
     -DBUILD_TEST=False \
@@ -101,6 +104,8 @@ if [ ! -d $DST/torch/cpu/lib ]; then
     -DUSE_STATIC_MKL=ON \
     -DUSE_MKLDNN=ON \
     -DUSE_MKL=ON \
+    -DUSE_XPU=OFF \
+    -DUSE_MPI=OFF \
     -DMKL_ROOT=$DST/intel/mkl/latest \
     ..
     make VERBOSE=1 -j${CPU_COUNT}
