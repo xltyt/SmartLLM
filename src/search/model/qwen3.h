@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2020 All Rights Reserved
- * Last modified: 2026.09.28 22:22:30
+ * Last modified: 2026.09.29 19:59:33
  *
 \****************************************************/
 
@@ -97,8 +97,7 @@ class Qwen3RotaryEmbedding : public torch::nn::Module {
 public:
   Qwen3RotaryEmbedding(
     int64_t head_dim,
-    double rope_theta = 1000000.0,
-    torch::Device device = torch::kCPU);
+    double rope_theta = 1000000.0);
 
   //
   //  Computes the inverse frequencies according to the original RoPE implementation
@@ -116,7 +115,7 @@ public:
   static std::tuple<torch::Tensor, double> compute_default_rope_parameters(
     int64_t head_dim,
     double rope_theta,
-    torch::Device device = torch::kCPU
+    torch::Device device
     );
 
   std::pair<torch::Tensor, torch::Tensor> forward(

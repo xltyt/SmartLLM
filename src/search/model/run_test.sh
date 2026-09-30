@@ -9,7 +9,6 @@ set -x
 
 source /data/local/conda_env.sh
 conda activate test
-#export LD_LIBRARY_PATH=${ROOT_DIR}/amd64/local/torch/gpu/12.2/lib/:$LD_LIBRARY_PATH 
 export LD_LIBRARY_PATH=${ROOT_DIR}/amd64/local/torch/cpu/lib/:$LD_LIBRARY_PATH 
 cd ${ROOT_DIR}/amd64/test/
 
@@ -43,5 +42,8 @@ python ${CUR_DIR}/test_runner.py
 ./test_model_qwen3 --gtest_filter=Model.Qwen3Runner
 
 ./test_model_qwen3 --gtest_filter=Model.Qwen3RunnerCache
+
+export LD_LIBRARY_PATH=${ROOT_DIR}/amd64/local/torch/gpu/12.2/lib/:$LD_LIBRARY_PATH 
+./test_model_qwen3_gpu_12.2 --gtest_filter=Model.Qwen3RunnerCache
 
 # vim: set expandtab ts=4 sw=4 sts=4:

@@ -314,9 +314,13 @@ torch::Tensor Qwen3DecoderLayer::forward(
 // ============ RotaryEmbedding ============
 Qwen3RotaryEmbedding::Qwen3RotaryEmbedding(
   int64_t head_dim,
-  double rope_theta /*= 1000000.0*/,
-  torch::Device device /*= torch::kCPU*/) {
-        
+  double rope_theta /*= 1000000.0*/
+  ) {
+#if USE_GPU
+  torch::Device device = torch::kCUDA;
+#else
+  torch::Device device = torch::kCPU;
+#endif
   auto [computed_inv_freq, factor] = compute_default_rope_parameters(head_dim, rope_theta, device);
   _attention_scaling = factor;
 
@@ -327,7 +331,7 @@ Qwen3RotaryEmbedding::Qwen3RotaryEmbedding(
 std::tuple<torch::Tensor, double> Qwen3RotaryEmbedding::compute_default_rope_parameters(
   int64_t head_dim,
   double rope_theta,
-  torch::Device device /*= torch::kCPU*/) {
+  torch::Device device) {
   
   auto arange_tensor = torch::arange(0, head_dim, 2, torch::device(device).dtype(torch::kInt64));
 
@@ -423,11 +427,12 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Model::prepare(
   int start_pos /*= 0*/
   ) {
 
+  auto device = this->embed_tokens->weight.device();
   torch::Tensor tensor_input_ids = torch::from_blob(
     (void *)input_ids.data(), 
     {1, static_cast<int64_t>(input_ids.size())}, 
     torch::kInt64
-    );
+    ).to(device);
   auto inputs_embeds = this->embed_tokens->forward(tensor_input_ids);
 
   int64_t seq_len = inputs_embeds.size(1);
@@ -455,7 +460,7 @@ torch::Tensor Qwen3Model::forward(
 
   //LOG(INFO) << "Decode[" << is_decode << "]";
 
-  std::optional<torch::Tensor> attention_mask = is_decode ? std::nullopt : std::make_optional(make_causal_mask(input_ids.size()));
+  std::optional<torch::Tensor> attention_mask = is_decode ? std::nullopt : std::make_optional(make_causal_mask(input_ids.size(), torch::kFloat32, hidden_states.device()));
   
   //time_start = mycommon::getMilliTime();
   for (int i = 0; i < this->layers->size(); i++) {

@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.29 12:05:12
+ * Last modified: 2026.09.29 20:34:14
  *
 \****************************************************/
 
@@ -385,7 +385,13 @@ TEST(Model, Qwen3RunnerCache) {
     batch_size,
     config["num_key_value_heads"],
     config["head_dim"],
-    max_seq_len
+    max_seq_len,
+    torch::kFloat32,
+#if USE_GPU
+    torch::kCUDA
+#else
+    torch::kCPU
+#endif
     );
   Qwen3ForCausalLM *model = new Qwen3ForCausalLM(
     config["vocab_size"],
@@ -408,6 +414,9 @@ TEST(Model, Qwen3RunnerCache) {
     }
   }
   model->eval();
+#if USE_GPU
+  model->to(torch::kCUDA);
+#endif
   LOG(INFO) << "Model Loaded";
   
   std::string content;
@@ -450,7 +459,13 @@ TEST(Model, Qwen3RunnerCache) {
     current_tokens.push_back(next_token);
   }
   uint64_t time_decode = mycommon::getMilliTime() - time_start;
-  LOG(INFO) << "Prefill Time[" << time_prefill << "] Decode Time[" << time_decode << "] Input[" << ref_input_ids.size() << "] Output[" << current_tokens.size() << "]";
+  LOG(INFO) << "TTFT[" << time_prefill << "] " <<
+               "Decode Time[" << time_decode << "] " <<
+               "TPOT[" << ((float)time_decode / current_tokens.size()) << "] " <<
+               "PrefillPerf[" << ((float)ref_input_ids.size() * 1000 / time_prefill) << "] " <<
+               "OutPerf[" << ((float)current_tokens.size() * 1000 / time_decode) << "] " <<
+               "Input[" << ref_input_ids.size() << "] " <<
+               "Output[" << current_tokens.size() << "]";
   QwenToken token("/data/Qwen3-0.6B/");
   std::vector<size_t> run_ids;
   for (auto _ : current_tokens) {
