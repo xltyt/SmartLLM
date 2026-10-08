@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.29 20:34:14
+ * Last modified: 2026.09.30 16:41:37
  *
 \****************************************************/
 
@@ -386,7 +386,7 @@ TEST(Model, Qwen3RunnerCache) {
     config["num_key_value_heads"],
     config["head_dim"],
     max_seq_len,
-    torch::kFloat32,
+    torch::kHalf,
 #if USE_GPU
     torch::kCUDA
 #else
@@ -416,6 +416,7 @@ TEST(Model, Qwen3RunnerCache) {
   model->eval();
 #if USE_GPU
   model->to(torch::kCUDA);
+  model->to(torch::kHalf);
 #endif
   LOG(INFO) << "Model Loaded";
   
