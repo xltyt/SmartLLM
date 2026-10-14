@@ -52,9 +52,6 @@
 [submodule "src/3rd_party/safetensors-cpp"]
 	path = src/3rd_party/safetensors-cpp/pkg
 	url = https://github.com/syoyo/safetensors-cpp.git
-[submodule "src/3rd_party/torch/pkg"]
-	path = src/3rd_party/torch/pkg
-	url = https://github.com/pytorch/pytorch.git
 [submodule "src/3rd_party/eigen/pkg"]
 	path = src/3rd_party/eigen/pkg
 	url = https://gitlab.com/libeigen/eigen.git
@@ -76,3 +73,9 @@
 [submodule "src/3rd_party/nlohmann/pkg"]
 	path = src/3rd_party/nlohmann/pkg
 	url = https://github.com/nlohmann/json
+[submodule "src/3rd_party/torch/pkg"]
+	path = src/3rd_party/torch/pkg
+	url = https://github.com/pytorch/pytorch.git
+[submodule "src/3rd_party/torch_npu/pkg"]
+	path = src/3rd_party/torch_npu/pkg
+	url = https://github.com/Ascend/pytorch

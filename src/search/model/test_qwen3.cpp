@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.30 16:41:37
+ * Last modified: 2026.10.14 20:02:12
  *
 \****************************************************/
 
@@ -11,6 +11,9 @@
 #include <torch/script.h>
 #include <glog/logging.h>
 #include <nlohmann/json.hpp>
+#if USE_NPU
+#include <torch_npu/torch_npu.h>
+#endif
 #include <file_utils.h>
 #include <timer.h>
 #include "utils/model_utils.h"
@@ -377,6 +380,11 @@ TEST(Model, Qwen3RunnerCache) {
   LOG(INFO) << "MKL available: " << at::hasMKL();
   LOG(INFO) << "MKL-DNN available: " << at::hasMKLDNN();
 
+#if USE_NPU
+  torch_npu::init_npu("npu:0");
+  auto device = at::Device("npu:0");
+#endif
+
   auto config = nlohmann::json::parse(std::ifstream("/data/Qwen3-0.6B/config.json"));
   int max_seq_len = 2048;
   int batch_size = 1;
@@ -386,10 +394,14 @@ TEST(Model, Qwen3RunnerCache) {
     config["num_key_value_heads"],
     config["head_dim"],
     max_seq_len,
-    torch::kHalf,
 #if USE_GPU
+    torch::kHalf,
     torch::kCUDA
+#elif USE_NPU
+    torch::kBFloat16,
+    device
 #else
+    torch::kHalf,
     torch::kCPU
 #endif
     );
@@ -416,6 +428,11 @@ TEST(Model, Qwen3RunnerCache) {
   model->eval();
 #if USE_GPU
   model->to(torch::kCUDA);
+  model->to(torch::kHalf);
+#elif USE_NPU
+  model->to(device);
+  model->to(torch::kBFloat16);
+#else
   model->to(torch::kHalf);
 #endif
   LOG(INFO) << "Model Loaded";
@@ -475,6 +492,9 @@ TEST(Model, Qwen3RunnerCache) {
   std::string my_text = token.decode(run_ids);
   LOG(INFO) << my_text;
   ASSERT_EQ(current_tokens, ref_output_ids);
+#if USE_NPU
+  torch_npu::finalize_npu();
+#endif
 }
 
 int main(int argc, char *argv[]) {

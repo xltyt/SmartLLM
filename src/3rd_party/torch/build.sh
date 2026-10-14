@@ -12,6 +12,7 @@ DST=$CUR_DIR/../../../${PLATFORM}/local
 DST_C=$(echo $DST | sed 's/\//\\\//g')
 CPU_COUNT=$(cat /proc/cpuinfo | grep "processor" | awk -F": " '{print $2}' | wc -l)
 #CPU_COUNT=12
+ARCH=$(uname -m)
 
 mkdir -p ${CUR_DIR}/../../../build
 cd ${CUR_DIR}/../../../build
@@ -21,7 +22,7 @@ export LD_LIBRARY_PATH=$DST/lib:$LD_LIBRARY_PATH
 export PKG_CONFIG_PATH=$DST/lib/pkgconfig:$PKG_CONFIG_PATH
 . $CUR_DIR/../build_conf.sh
 
-export TORCH_VERSION=2.5.1
+export TORCH_VERSION=2.10.0
 #tar zxf $CUR_DIR/pkg/pytorch-${TORCH_VERSION}-git.tar.gz
 cp -r $CUR_DIR/pkg/ pytorch
 cd pytorch
@@ -55,29 +56,47 @@ if [ ! -d $DST/torch/cpu/lib ]; then
   #cp -f build/sleef/bin/* $DST/torch/cpu/bin/
   if [ "$PLATFORM" = "arm" ]; then
     #sed -i '545,546s/^/#/' ../CMakeLists.txt
-    cmake \
-    -DUSE_CUDA=False \
-    -DBUILD_TEST=False \
-    -DBUILD_PYTHON=False \
-    -DBUILD_ONNX_PYTHON=False \
-    -DBUILD_SHARED_LIBS=ON \
-    -DBUILD_CUSTOM_PROTOBUF=OFF \
-    -DUSE_GLOG=OFF \
-    -DCMAKE_PREFIX_PATH=$DST \
-    -DCMAKE_EXE_LINKER_FLAGS="-L$DST/lib -static-libstdc++ -static-libgcc -lprotobuf -l:libgfortran.a -Wl,--no-as-needed -lgfortran" \
-    -DCMAKE_MODULE_LINKER_FLAGS="-L$DST/lib -static-libstdc++ -static-libgcc -lprotobuf -l:libgfortran.a -Wl,--no-as-needed -lgfortran" \
-    -DCMAKE_SHARED_LINKER_FLAGS="-L$DST/lib -static-libstdc++ -static-libgcc -lprotobuf -l:libgfortran.a -Wl,--no-as-needed -lgfortran" \
-    -DCMAKE_INSTALL_PREFIX=$DST/torch/cpu \
-    -DCMAKE_C_COMPILER=${CROSS_COMPILE}gcc \
-    -DCMAKE_CXX_COMPILER=${CROSS_COMPILE}g++ \
-    -DCMAKE_LINKER=${CROSS_COMPILE}ld \
-    -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-    -DCMAKE_SYSTEM_NAME=Linux \
-    -DGLIBCXX_USE_CXX11_ABI=1 \
-    -DNATIVE_BUILD_DIR=$DST/../../amd64/local/torch/cpu/ \
-    -DONNX_CUSTOM_PROTOC_EXECUTABLE=$DST/../../amd64/local/bin/protoc \
-    -DProtobuf_PROTOC_EXECUTABLE=$DST/../../amd64/local/bin/protoc \
-    ..
+    if [ "$ARCH" = "aarch64" ]; then
+      cmake \
+      -DUSE_CUDA=False \
+      -DBUILD_TEST=False \
+      -DBUILD_PYTHON=False \
+      -DBUILD_ONNX_PYTHON=False \
+      -DBUILD_SHARED_LIBS=ON \
+      -DBUILD_CUSTOM_PROTOBUF=OFF \
+      -DUSE_GLOG=OFF \
+      -DCMAKE_PREFIX_PATH=$DST \
+      -DCMAKE_EXE_LINKER_FLAGS="-L$DST/lib -static-libstdc++ -static-libgcc -lprotobuf -l:libgfortran.a -Wl,--no-as-needed -lgfortran" \
+      -DCMAKE_MODULE_LINKER_FLAGS="-L$DST/lib -static-libstdc++ -static-libgcc -lprotobuf -l:libgfortran.a -Wl,--no-as-needed -lgfortran" \
+      -DCMAKE_SHARED_LINKER_FLAGS="-L$DST/lib -static-libstdc++ -static-libgcc -lprotobuf -l:libgfortran.a -Wl,--no-as-needed -lgfortran" \
+      -DCMAKE_INSTALL_PREFIX=$DST/torch/cpu \
+      -DPython_EXECUTABLE=$(which python3) \
+      ..
+    else
+      cmake \
+      -DUSE_CUDA=False \
+      -DBUILD_TEST=False \
+      -DBUILD_PYTHON=False \
+      -DBUILD_ONNX_PYTHON=False \
+      -DBUILD_SHARED_LIBS=ON \
+      -DBUILD_CUSTOM_PROTOBUF=OFF \
+      -DUSE_GLOG=OFF \
+      -DCMAKE_PREFIX_PATH=$DST \
+      -DCMAKE_EXE_LINKER_FLAGS="-L$DST/lib -static-libstdc++ -static-libgcc -lprotobuf -l:libgfortran.a -Wl,--no-as-needed -lgfortran" \
+      -DCMAKE_MODULE_LINKER_FLAGS="-L$DST/lib -static-libstdc++ -static-libgcc -lprotobuf -l:libgfortran.a -Wl,--no-as-needed -lgfortran" \
+      -DCMAKE_SHARED_LINKER_FLAGS="-L$DST/lib -static-libstdc++ -static-libgcc -lprotobuf -l:libgfortran.a -Wl,--no-as-needed -lgfortran" \
+      -DCMAKE_INSTALL_PREFIX=$DST/torch/cpu \
+      -DCMAKE_C_COMPILER=${CROSS_COMPILE}gcc \
+      -DCMAKE_CXX_COMPILER=${CROSS_COMPILE}g++ \
+      -DCMAKE_LINKER=${CROSS_COMPILE}ld \
+      -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+      -DCMAKE_SYSTEM_NAME=Linux \
+      -DGLIBCXX_USE_CXX11_ABI=1 \
+      -DNATIVE_BUILD_DIR=$DST/../../amd64/local/torch/cpu/ \
+      -DONNX_CUSTOM_PROTOC_EXECUTABLE=$DST/../../amd64/local/bin/protoc \
+      -DProtobuf_PROTOC_EXECUTABLE=$DST/../../amd64/local/bin/protoc \
+      ..
+    fi
     make VERBOSE=1 -j${CPU_COUNT}
     make install
     #cp lib/libgloo.a $DST/torch/cpu/lib/

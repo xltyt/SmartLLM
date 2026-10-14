@@ -1,14 +1,20 @@
 CURRENT_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 CURRENT_DIR := $(shell dirname $(CURRENT_PATH))
 DATE = $(shell date "+%Y%m%d%H")
+ARCH := $(shell uname -m)
 
 MODE ?= cpu
 CUDA_VERSION ?= 12.2
+CANN_VERSION ?= 9.0.0
 PLATFORM ?= amd64
 
 VERSION=$(shell awk -F'|' '{print $$2}' ../../README.md | sed '/^ *$$/d' | awk -F'`' '{print $$2}' | tail -1)
 ifeq ($(PLATFORM),arm)
-  BUILD_MODULE_NAME=llm_service_arm
+  ifeq ($(MODE),npu)
+    BUILD_MODULE_NAME=llm_service_arm_npu_$(CANN_VERSION)
+  else
+    BUILD_MODULE_NAME=llm_service_arm
+  endif
 else
   ifeq ($(MODE),gpu)
 	BUILD_MODULE_NAME=llm_service_gpu_$(CUDA_VERSION)
@@ -33,17 +39,29 @@ OBJS_DIR := $(CURRENT_DIR)/../../$(PLATFORM)/build/$(BUILD_MODULE_NAME)
 THIRD_DIR := $(CURRENT_DIR)/../../$(PLATFORM)/local
 TEST_DIR := $(CURRENT_DIR)/../../$(PLATFORM)/test
 ifeq ($(PLATFORM),arm)
-  THIRD_HOST_DIR := $(THIRD_DIR)/../../amd64/local
+  ifeq ($(ARCH), x86_64)
+    THIRD_HOST_DIR := $(THIRD_DIR)/../../amd64/local
+  else
+    THIRD_HOST_DIR := $(THIRD_DIR)
+  endif
 else
   THIRD_HOST_DIR := $(THIRD_DIR)
 endif
 
+TORCH_INCLUDE =
 ifeq ($(MODE),gpu)
   TORCH_ROOT = $(THIRD_DIR)/torch/gpu/$(CUDA_VERSION)
   TORCH_LIB = -Wl,--no-as-needed -ltorch_cuda -lc10_cuda -Wl,--as-needed -lc10 -ltorch_cpu -ltorch
-else
-  TORCH_ROOT = $(THIRD_DIR)/torch/cpu
-  TORCH_LIB = -ltorch_cpu -ltorch -lc10
+else 
+  ifeq ($(MODE),npu)
+    TORCH_ROOT = $(THIRD_DIR)/torch_npu/
+    TORCH_LIB = -L$(THIRD_DIR)/torch/cpu/lib/ -Wl,--no-as-needed -ltorch_npu -Wl,--as-needed -ltorch_cpu -ltorch -lc10
+    TORCH_INCLUDE = -I$(THIRD_DIR)/torch/cpu/include
+    TORCH_INCLUDE += -I$(THIRD_DIR)/torch/cpu/include/torch/csrc/api/include/
+  else
+    TORCH_ROOT = $(THIRD_DIR)/torch/cpu
+    TORCH_LIB = -ltorch_cpu -ltorch -lc10
+  endif
 endif
 
 CUDA_INCLUDE ?= 
@@ -69,6 +87,7 @@ INCLUDES += \
   -I$(OBJS_DIR) \
   -I$(TORCH_ROOT)/include/ \
   -I$(TORCH_ROOT)/include/torch/csrc/api/include/ \
+  $(TORCH_INCLUDE) \
   $(CUDA_INCLUDE) \
   -I$(THIRD_DIR)/include/eigen3/ \
   -I$(THIRD_DIR)/include/
@@ -104,6 +123,9 @@ LIBS += \
 
 ifeq ($(MODE),gpu)
   CFLAGS += -DUSE_GPU=1 -DMY_CUDA_VERSION=\"$(CUDA_VERSION)\" -DGLIBCXX_USE_CXX11_ABI=1
+endif
+ifeq ($(MODE),npu)
+  CFLAGS += -DUSE_NPU=1 -DMY_CANN_VERSION=\"$(CANN_VERSION)\" -DGLIBCXX_USE_CXX11_ABI=1
 endif
 CFLAGS    += -O2 -g -std=c++17 -fopenmp -static-libstdc++ -static-libgcc
 ifeq ($(PLATFORM),amd64)
@@ -158,8 +180,13 @@ ifeq ($(MODE),gpu)
   TEST_LAYERS_MODULE_NAME=test_layers_gpu_$(CUDA_VERSION)
   TEST_MODEL_QWEN3_MODULE_NAME=test_model_qwen3_gpu_$(CUDA_VERSION)
 else
-  TEST_LAYERS_MODULE_NAME=test_layers
-  TEST_MODEL_QWEN3_MODULE_NAME=test_model_qwen3
+  ifeq ($(MODE),npu)
+    TEST_LAYERS_MODULE_NAME=test_layers_npu_$(CANN_VERSION)
+    TEST_MODEL_QWEN3_MODULE_NAME=test_model_qwen3_npu_$(CANN_VERSION)
+  else
+    TEST_LAYERS_MODULE_NAME=test_layers
+    TEST_MODEL_QWEN3_MODULE_NAME=test_model_qwen3
+  endif
 endif
 TEST_MODEL_UTILS_MODULE_NAME=test_module_utils
 

@@ -124,7 +124,7 @@ inline std::pair<torch::Tensor, torch::Tensor> eager_attention_forward(
 
     // 3. 叠加 Attention Mask (通常在 Prefill 时包含负无穷 -inf)
     if (attention_mask.has_value() && attention_mask->defined()) {
-        attn_weights = attn_weights + attention_mask.value();
+        attn_weights = attn_weights + attention_mask->to(attn_weights.dtype());
     }
 
     // 4. 数值稳定 Softmax：强制以 FP32 计算指数与累加，然后转回原始数据类型
@@ -138,7 +138,7 @@ inline std::pair<torch::Tensor, torch::Tensor> eager_attention_forward(
     // 6. 加权求和得到输出: attn_weights · V
     // value_states: [B, N, KV_len, D]
     // attn_output: [B, N, Q_len, D]
-    auto attn_output = torch::matmul(attn_weights, value_states);
+    auto attn_output = torch::matmul(attn_weights, value_states.to(attn_weights.dtype()));
 
     // 7. 转置并确保内存连续: [B, N, Q_len, D] -> [B, Q_len, N, D]
     attn_output = attn_output.transpose(1, 2).contiguous();
@@ -158,6 +158,7 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
   int64_t seq_len = hidden_states.size(1);
   std::vector<int64_t> hidden_shape = {batch_size, seq_len, -1, _head_dim};
 
+  //LOG(INFO) << "Attention forward Q";
   auto q_projected = this->q_proj->forward(hidden_states).view(hidden_shape);
   auto query_states = this->q_norm->forward(q_projected).transpose(1, 2);
 
@@ -165,12 +166,15 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
   auto key_states = this->k_norm->forward(k_projected).transpose(1, 2);
   //auto key_states = this->k_proj->forward(hidden_states).view(hidden_shape).transpose(1, 2);
 
+  //LOG(INFO) << "Attention forward V";
   auto value_states = this->v_proj->forward(hidden_states).view(hidden_shape).transpose(1, 2);
   
+  //LOG(INFO) << "Attention Position Emb";
   const torch::Tensor& position_embeddings_cos = std::get<0>(position_embeddings);
   const torch::Tensor& position_embeddings_sin = std::get<1>(position_embeddings);
   //const torch::Tensor& position_embeddings_sin = std::get<0>(position_embeddings);
 
+  //LOG(INFO) << "Attention Rotary Postion";
   std::tie(query_states, key_states) = apply_rotary_pos_emb(
     query_states,
     key_states,
@@ -178,10 +182,12 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
     position_embeddings_sin
     );
   
+  //LOG(INFO) << "Attention Update KV";
   if (_kv_cache != NULL) {
     std::tie(key_states, value_states) = _kv_cache->update(layer_idx, key_states, value_states, start_pos);
   }
 
+  //LOG(INFO) << "Attention Eager";
   auto [attn_output, attn_weights] = eager_attention_forward(
     query_states,
     key_states,
@@ -193,6 +199,7 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
 		false
   );
 
+  //LOG(INFO) << "Attention Output";
   attn_output = attn_output.reshape({batch_size, seq_len, -1}).contiguous();
   attn_output = this->o_proj(attn_output);
   return {attn_output, attn_weights};
@@ -460,7 +467,7 @@ torch::Tensor Qwen3Model::forward(
 
   //LOG(INFO) << "Decode[" << is_decode << "]";
 
-  std::optional<torch::Tensor> attention_mask = is_decode ? std::nullopt : std::make_optional(make_causal_mask(input_ids.size(), torch::kFloat32, hidden_states.device()));
+  std::optional<torch::Tensor> attention_mask = is_decode ? std::nullopt : std::make_optional(make_causal_mask(input_ids.size(), hidden_states.scalar_type(), hidden_states.device()));
   
   //time_start = mycommon::getMilliTime();
   for (int i = 0; i < this->layers->size(); i++) {
