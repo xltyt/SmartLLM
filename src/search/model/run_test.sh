@@ -56,19 +56,19 @@ for MODEL_NAME in "${MODEL_NAMES[@]}"; do
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_runner.py
     MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3Runner
     
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3RunnerCache
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Qwen3RunnerCache.*
   fi
   if [ ! -f ./test_runner.pt ] || [ ! -f ./test_runner_logits.pt ]; then
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_runner.py || exit 1
   fi
   which nvidia-smi &> /dev/null
   if [ $? -eq 0 ]; then
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/gpu/12.2/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_gpu_12.2 --gtest_filter=Model.Qwen3RunnerCache
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/gpu/12.2/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_gpu_12.2 --gtest_filter=Qwen3RunnerCache.*
   fi
   
   which npu-smi &> /dev/null
   if [ $? -eq 0 ]; then
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch_npu/lib/:${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_npu_9.0.0 --gtest_filter=Model.Qwen3RunnerCache
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch_npu/lib/:${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_npu_9.0.0 --gtest_filter=Qwen3RunnerCache.*
   fi
   cd ..
 done

@@ -4,6 +4,12 @@
 #include <vector>
 #include <timer.h>
 #include "utils/model_utils.h"
+#if USE_GPU
+#include <ATen/Context.h>
+#endif
+#if USE_NPU
+#include <torch_npu/csrc/aten/CustomFunctions.h>
+#endif
 
 // ============ Attention ============
 Qwen3Attention::Qwen3Attention(
@@ -146,6 +152,126 @@ inline std::pair<torch::Tensor, torch::Tensor> eager_attention_forward(
     return {attn_output, attn_weights};
 }
 
+#if USE_GPU
+static void enable_gpu_flash_sdp_once() {
+    static bool enabled = false;
+    if (enabled) {
+        return;
+    }
+    at::globalContext().setUserEnabledFlashSDP(true);
+    at::globalContext().setUserEnabledMemEfficientSDP(false);
+    at::globalContext().setUserEnabledMathSDP(false);
+    enabled = true;
+}
+
+// GPU fused attention via libtorch SDPA Flash backend (FlashAttention-class kernel).
+// CPU keeps eager_attention_forward unchanged.
+inline std::pair<torch::Tensor, torch::Tensor> gpu_flash_attention_forward(
+    const torch::Tensor& query,
+    const torch::Tensor& key,
+    const torch::Tensor& value,
+    int64_t num_key_value_groups,
+    const std::optional<torch::Tensor>& attention_mask,
+    double scaling = 0.0)
+{
+    (void)attention_mask;
+    enable_gpu_flash_sdp_once();
+    if (scaling <= 0.0) {
+        scaling = 1.0 / std::sqrt(static_cast<double>(query.size(-1)));
+    }
+
+    // Decode attends to the full KV cache prefix; prefill uses causal FA.
+    const bool is_causal = query.size(2) > 1;
+    const bool enable_gqa = num_key_value_groups > 1;
+
+    auto attn_output = at::scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        c10::nullopt,  // attn_mask
+        0.0,  // dropout_p
+        is_causal,  // is_causal
+        scaling,  // scale
+        enable_gqa);  // enable_gqa
+
+    attn_output = attn_output.transpose(1, 2).contiguous();
+    return {attn_output, torch::Tensor()};
+}
+#endif
+
+#if USE_NPU
+inline std::pair<torch::Tensor, torch::Tensor> npu_flash_attention_forward(
+    const torch::Tensor& query,
+    const torch::Tensor& key,
+    const torch::Tensor& value,
+    int64_t num_key_value_groups,
+    const std::optional<torch::Tensor>& attention_mask,
+    double scaling = 0.0)
+{
+    (void)num_key_value_groups;
+    if (scaling <= 0.0) {
+        scaling = 1.0 / std::sqrt(static_cast<double>(query.size(-1)));
+    }
+
+    auto q = query.contiguous();
+    auto k = key.contiguous();
+    auto v = value.contiguous();
+    const int64_t num_heads = q.size(1);
+    const int64_t num_kv_heads = k.size(1);
+    std::optional<at::Tensor> atten_mask;
+    if (attention_mask.has_value() && attention_mask->defined()) {
+        // FIA only accepts BOOL/INT8/UINT8. True means masked.
+        const auto& mask = *attention_mask;
+        if (mask.scalar_type() == torch::kBool ||
+            mask.scalar_type() == torch::kChar ||
+            mask.scalar_type() == torch::kByte) {
+            atten_mask = mask.contiguous();
+        } else {
+            atten_mask = mask.ne(0).contiguous();
+        }
+    }
+
+    auto result = at_npu::native::custom_ops::npu_fused_infer_attention_score(
+        q,
+        k,
+        v,
+        {},  // pse_shift
+        atten_mask,  // atten_mask
+        ::std::nullopt,  // actual_seq_lengths
+        ::std::nullopt,  // actual_seq_lengths_kv
+        {},  // dequant_scale1
+        {},  // quant_scale1
+        {},  // dequant_scale2
+        {},  // quant_scale2
+        {},  // quant_offset2
+        {},  // antiquant_scale
+        {},  // antiquant_offset
+        {},  // key_antiquant_scale
+        {},  // key_antiquant_offset
+        {},  // value_antiquant_scale
+        {},  // value_antiquant_offset
+        {},  // block_table
+        {},  // query_padding_size
+        {},  // kv_padding_size
+        {},  // key_shared_prefix
+        {},  // value_shared_prefix
+        ::std::nullopt,  // actual_shared_prefix_len
+        {},  // query_rope
+        {},  // key_rope
+        {},  // key_rope_antiquant_scale
+        num_heads,  // num_heads
+        scaling,  // scale
+        2147483647,  // pre_tokens
+        2147483647,  // next_tokens
+        "BNSD",  // input_layout
+        num_kv_heads,  // num_key_value_heads
+        0);  // sparse_mode
+
+    auto attn_output = std::get<0>(result).transpose(1, 2).contiguous();
+    return {attn_output, torch::Tensor()};
+}
+#endif
+
 std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
   const torch::Tensor& hidden_states,
   const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
@@ -188,6 +314,25 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
   }
 
   //LOG(INFO) << "Attention Eager";
+#if USE_GPU
+  auto [attn_output, attn_weights] = gpu_flash_attention_forward(
+    query_states,
+    key_states,
+    value_states,
+    _num_key_value_groups,
+    attention_mask,
+    _scaling
+  );
+#elif USE_NPU
+  auto [attn_output, attn_weights] = npu_flash_attention_forward(
+    query_states,
+    key_states,
+    value_states,
+    _num_key_value_groups,
+    attention_mask,
+    _scaling
+  );
+#else
   auto [attn_output, attn_weights] = eager_attention_forward(
     query_states,
     key_states,
@@ -198,6 +343,7 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
     0.0,
 		false
   );
+#endif
 
   //LOG(INFO) << "Attention Output";
   attn_output = attn_output.reshape({batch_size, seq_len, -1}).contiguous();

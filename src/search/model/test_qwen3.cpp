@@ -11,6 +11,9 @@
 #include <torch/script.h>
 #include <glog/logging.h>
 #include <nlohmann/json.hpp>
+#if USE_GPU
+#include <torch/cuda.h>
+#endif
 #if USE_NPU
 #include <torch_npu/torch_npu.h>
 #endif
@@ -413,94 +416,129 @@ TEST(Model, Qwen3Runner) {
   ASSERT_EQ(current_tokens, ref_output_ids);
 }
 
-TEST(Model, Qwen3RunnerCache) {
-  LOG(INFO) << "num_threads: " << torch::get_num_threads();
-  LOG(INFO) << "num_interop_threads: " << torch::get_num_interop_threads();
-  LOG(INFO) << "MKL available: " << at::hasMKL();
-  LOG(INFO) << "MKL-DNN available: " << at::hasMKLDNN();
-  char *model_name_p = getenv("MODEL_NAME");
-  std::string model_name(NULL == model_name_p ? "" : model_name_p);
-
-#if USE_NPU
-  LOG(INFO) << "Init NPU...";
-  torch_npu::init_npu("npu:0");
-  auto device = at::Device("npu:0");
-  LOG(INFO) << "Init NPU Finished";
-#endif
-
-  auto config = nlohmann::json::parse(std::ifstream("/data/" + model_name + "/config.json"));
-  int max_seq_len = 2048;
-  int batch_size = 1;
-  LOG(INFO) << "Init KV Cache...";
-  KVCache *kv_cache = new KVCache(
-    config["num_hidden_layers"],
-    batch_size,
-    config["num_key_value_heads"],
-    config["head_dim"],
-    max_seq_len,
+inline void sync_device() {
 #if USE_GPU
-    torch::kHalf,
-    torch::kCUDA
+  torch::cuda::synchronize();
 #elif USE_NPU
-    torch::kBFloat16,
-    device
-#else
-    torch::kHalf,
-    torch::kCPU
+  torch::npu::synchronize();
 #endif
-    );
-  LOG(INFO) << "Init KV Cache Finished";
-  Qwen3ForCausalLM *model = new Qwen3ForCausalLM(
-    config["vocab_size"],
-    config["hidden_size"],
-    config["num_hidden_layers"],
-    config["num_attention_heads"],
-    config["num_key_value_heads"],
-    config["head_dim"],
-    config["intermediate_size"],
-    config["rms_norm_eps"],
-    kv_cache
-    );
-  LOG(INFO) << "Init Qwen3ForCausalLM Finished";
-  //load_module_from_safetensors(*model, "/data/Qwen3-0.6B/model.safetensors");
+}
+
+int64_t greedy_token_id(const torch::Tensor& logits) {
+  return torch::argmax(logits.reshape({-1})).item<int64_t>();
+}
+
+class Qwen3RunnerCache : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    LOG(INFO) << "num_threads: " << torch::get_num_threads();
+    LOG(INFO) << "num_interop_threads: " << torch::get_num_interop_threads();
+    LOG(INFO) << "MKL available: " << at::hasMKL();
+    LOG(INFO) << "MKL-DNN available: " << at::hasMKLDNN();
+    char *model_name_p = getenv("MODEL_NAME");
+    model_name = (NULL == model_name_p ? "" : model_name_p);
+
 #if USE_NPU
-  load_module_from_safetensors_dir(*model, "/data/" + model_name);
-	//for (const auto& p : model->named_parameters()) {
-	//  // 随机初始化的 Linear 大约 N(0, 0.02)，预训练权重 std 会大很多
-	//  LOG(INFO) << p.key() << " mean=" << p.value().mean().item<float>() << " std=" << p.value().std().item<float>();
-	//}
-	//LOG(INFO) << "lm_head vs embed close=" << torch::allclose(model->lm_head->weight, model->model->embed_tokens->weight);
+    LOG(INFO) << "Init NPU...";
+    torch_npu::init_npu("npu:0");
+    device = at::Device("npu:0");
+    LOG(INFO) << "Init NPU Finished";
+#elif USE_GPU
+    device = torch::Device(torch::kCUDA);
 #else
-  load_module_from_safetensors_dir(*model, "/data/" + model_name);
+    device = torch::Device(torch::kCPU);
 #endif
-  LOG(INFO) << "Load Model Tensors Finished";
-  if (config["tie_word_embeddings"]) {
-    // Exception: a leaf Variable that requires grad is being used in an in-place operation.
-    torch::NoGradGuard no_grad;
-    model->lm_head->weight.copy_(model->model->embed_tokens->weight);
-    LOG(INFO) << "Load LM Head Finished";
-  }
-  {
-    torch::NoGradGuard no_grad;
-    for (auto& param : model->parameters()) {
-      if (!param.is_contiguous()) {
-        param.data() = param.data().contiguous();
-      }
+
+    auto config = nlohmann::json::parse(std::ifstream("/data/" + model_name + "/config.json"));
+    int max_seq_len = 2048;
+    int batch_size = 1;
+    LOG(INFO) << "Init KV Cache...";
+    kv_cache = new KVCache(
+      config["num_hidden_layers"],
+      batch_size,
+      config["num_key_value_heads"],
+      config["head_dim"],
+      max_seq_len,
+#if USE_GPU
+      torch::kHalf,
+      torch::kCUDA
+#elif USE_NPU
+      torch::kBFloat16,
+      device
+#else
+      torch::kHalf,
+      torch::kCPU
+#endif
+      );
+    LOG(INFO) << "Init KV Cache Finished";
+    model = new Qwen3ForCausalLM(
+      config["vocab_size"],
+      config["hidden_size"],
+      config["num_hidden_layers"],
+      config["num_attention_heads"],
+      config["num_key_value_heads"],
+      config["head_dim"],
+      config["intermediate_size"],
+      config["rms_norm_eps"],
+      kv_cache
+      );
+    LOG(INFO) << "Init Qwen3ForCausalLM Finished";
+    load_module_from_safetensors_dir(*model, "/data/" + model_name);
+    LOG(INFO) << "Load Model Tensors Finished";
+    if (config["tie_word_embeddings"]) {
+      torch::NoGradGuard no_grad;
+      model->lm_head->weight.copy_(model->model->embed_tokens->weight);
+      LOG(INFO) << "Load LM Head Finished";
     }
-    LOG(INFO) << "Contiguous Finished";
-  }
-  model->eval();
+    {
+      torch::NoGradGuard no_grad;
+      for (auto& param : model->parameters()) {
+        if (!param.is_contiguous()) {
+          param.data() = param.data().contiguous();
+        }
+      }
+      LOG(INFO) << "Contiguous Finished";
+    }
+    model->eval();
 #if USE_GPU
-  model->to(torch::kCUDA);
-  model->to(torch::kHalf);
+    model->to(torch::kCUDA);
+    model->to(torch::kHalf);
 #elif USE_NPU
-  model->to(device);
-  model->to(torch::kBFloat16);
+    model->to(device);
+    model->to(torch::kBFloat16);
 #else
-  model->to(torch::kHalf);
+    model->to(torch::kHalf);
 #endif
-  LOG(INFO) << "Model Loaded";
-  
+    LOG(INFO) << "Model Loaded";
+  }
+
+  static void TearDownTestSuite() {
+    delete model;
+    model = nullptr;
+    delete kv_cache;
+    kv_cache = nullptr;
+#if USE_NPU
+    torch_npu::finalize_npu();
+#endif
+  }
+
+  void SetUp() override {
+    ASSERT_NE(kv_cache, nullptr);
+    kv_cache->reset();
+  }
+
+  static std::string model_name;
+  static torch::Device device;
+  static KVCache *kv_cache;
+  static Qwen3ForCausalLM *model;
+};
+
+std::string Qwen3RunnerCache::model_name;
+torch::Device Qwen3RunnerCache::device = torch::Device(torch::kCPU);
+KVCache *Qwen3RunnerCache::kv_cache = nullptr;
+Qwen3ForCausalLM *Qwen3RunnerCache::model = nullptr;
+
+TEST_F(Qwen3RunnerCache, Correctness) {
   std::string content;
   mycommon::file_read("./test_runner.pt", content);
   torch::IValue ivalue = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end()));
@@ -508,10 +546,10 @@ TEST(Model, Qwen3RunnerCache) {
     LOG(WARNING) << "Loaded data is not a dictionary!";
     ASSERT_EQ(true, false);
   }
-	auto data = ivalue.toGenericDict();
-	auto ids = data.at("ids").toTensor();
-	auto max_new_tokens = data.at("max_length").toInt();
-	auto ref_output = data.at("output").toTensor();
+  auto data = ivalue.toGenericDict();
+  auto ids = data.at("ids").toTensor();
+  auto max_new_tokens = data.at("max_length").toInt();
+  auto ref_output = data.at("output").toTensor();
   std::vector<int64_t> ref_output_ids(ref_output.data_ptr<int64_t>(), ref_output.data_ptr<int64_t>() + ref_output.numel());
   std::vector<int64_t> ref_input_ids(ids.data_ptr<int64_t>(), ids.data_ptr<int64_t>() + ids.numel());
   ASSERT_TRUE(mycommon::file_exist("./test_runner_logits.pt")) << "Run test_runner.py to generate reference logits";
@@ -521,6 +559,7 @@ TEST(Model, Qwen3RunnerCache) {
   ASSERT_TRUE(torch::equal(logits_data.at("output").toTensor(), ref_output)) << "Reference logits are stale";
   ASSERT_EQ(ref_logits.dim(), 2);
   ASSERT_EQ(ref_logits.size(0), ref_output_ids.size() - ref_input_ids.size());
+  auto config = nlohmann::json::parse(std::ifstream("/data/" + model_name + "/config.json"));
   ASSERT_EQ(ref_logits.size(1), config["vocab_size"].get<int64_t>());
   const int64_t prompt_len = static_cast<int64_t>(ref_input_ids.size());
   const int64_t gen_len = std::min(
@@ -602,14 +641,11 @@ TEST(Model, Qwen3RunnerCache) {
     return selected;
   };
 
-  uint64_t time_start = mycommon::getMilliTime();
   auto logits = model->forward(
     ref_input_ids,
     1,
     0
     );
-  uint64_t time_prefill = mycommon::getMilliTime() - time_start;
-  time_start = mycommon::getMilliTime();
   eval_step(0, logits);
   int64_t feed = ref_output_ids[prompt_len];
   for (int64_t step = 1; step < gen_len; ++step) {
@@ -621,16 +657,8 @@ TEST(Model, Qwen3RunnerCache) {
     eval_step(step, logits);
     feed = ref_output_ids[prompt_len + step];
   }
-  uint64_t time_decode = mycommon::getMilliTime() - time_start;
   const int eval_steps = match_count + allowed_mismatch + hard_mismatch;
   const float mean_abs_err = mean_abs_sum / std::max(eval_steps, 1);
-  LOG(INFO) << "TTFT[" << time_prefill << "] "
-            << "Decode Time[" << time_decode << "] "
-            << "TPOT[" << ((float)time_decode / greedy_tokens.size()) << "] "
-            << "PrefillPerf[" << ((float)prompt_len * 1000 / time_prefill) << "] "
-            << "OutPerf[" << ((float)greedy_tokens.size() * 1000 / time_decode) << "] "
-            << "Input[" << prompt_len << "] "
-            << "Output[" << greedy_tokens.size() << "]";
   LOG(INFO) << "Eval match[" << match_count
             << "] allowed_mismatch[" << allowed_mismatch
             << "] hard_mismatch[" << hard_mismatch
@@ -655,9 +683,66 @@ TEST(Model, Qwen3RunnerCache) {
   EXPECT_EQ(hard_mismatch, 0) << "Greedy argmax left reference top2 while top2 gap was > "
                               << kAllowGapUlp << " ULP";
   EXPECT_LE(max_abs_err, kMaxAbsLimit) << "Teacher-force logits max abs error too large";
-#if USE_NPU
-  torch_npu::finalize_npu();
-#endif
+}
+
+TEST_F(Qwen3RunnerCache, Perf) {
+  std::string content;
+  mycommon::file_read("./test_runner.pt", content);
+  torch::IValue ivalue = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end()));
+  if (!ivalue.isGenericDict()) {
+    LOG(WARNING) << "Loaded data is not a dictionary!";
+    ASSERT_EQ(true, false);
+  }
+  auto data = ivalue.toGenericDict();
+  auto ids = data.at("ids").toTensor();
+  auto max_new_tokens = data.at("max_length").toInt();
+  auto ref_output = data.at("output").toTensor();
+  std::vector<int64_t> ref_output_ids(ref_output.data_ptr<int64_t>(), ref_output.data_ptr<int64_t>() + ref_output.numel());
+  std::vector<int64_t> ref_input_ids(ids.data_ptr<int64_t>(), ids.data_ptr<int64_t>() + ids.numel());
+  const int64_t prompt_len = static_cast<int64_t>(ref_input_ids.size());
+  const int64_t gen_len = std::min(
+    static_cast<int64_t>(max_new_tokens),
+    static_cast<int64_t>(ref_output_ids.size()) - prompt_len);
+  ASSERT_GT(gen_len, 0);
+
+  {
+    auto warmup_logits = model->forward(ref_input_ids, 1, 0);
+    const int64_t warmup_token = greedy_token_id(warmup_logits);
+    (void)model->forward({warmup_token}, 1, prompt_len);
+    sync_device();
+    kv_cache->reset();
+  }
+
+  sync_device();
+  uint64_t time_start = mycommon::getMilliTime();
+  auto logits = model->forward(
+    ref_input_ids,
+    1,
+    0
+    );
+  sync_device();
+  uint64_t time_prefill = mycommon::getMilliTime() - time_start;
+
+  std::vector<int64_t> greedy_tokens = ref_input_ids;
+  time_start = mycommon::getMilliTime();
+  for (int64_t step = 0; step < gen_len; ++step) {
+    const int64_t next_token = greedy_token_id(logits);
+    greedy_tokens.push_back(next_token);
+    if (step + 1 >= gen_len) {
+      break;
+    }
+    logits = model->forward({next_token}, /*logits_to_keep=*/1, prompt_len + step);
+  }
+  sync_device();
+  uint64_t time_decode = mycommon::getMilliTime() - time_start;
+  const int64_t gen_tokens = static_cast<int64_t>(greedy_tokens.size()) - prompt_len;
+  LOG(INFO) << "TTFT[" << time_prefill << "] "
+            << "Decode Time[" << time_decode << "] "
+            << "TPOT[" << ((float)time_decode / std::max(gen_tokens, static_cast<int64_t>(1))) << "] "
+            << "PrefillPerf[" << ((float)prompt_len * 1000 / time_prefill) << "] "
+            << "OutPerf[" << ((float)gen_tokens * 1000 / time_decode) << "] "
+            << "Input[" << prompt_len << "] "
+            << "Output[" << gen_tokens << "]";
 }
 
 int main(int argc, char *argv[]) {
