@@ -31,6 +31,7 @@ clean:
 	MODE=gpu make clean -C search
 	PLATFORM=arm make clean -C common
 	PLATFORM=arm make clean -C search
+	MODE=npu PLATFORM=arm make clean -C search
 
 distclean:
 	make clean

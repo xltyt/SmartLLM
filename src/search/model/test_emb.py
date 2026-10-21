@@ -3,8 +3,9 @@
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
+import os
 
-name = "/data/Qwen3-0.6B"
+name = "/data/" + os.getenv("MODEL_NAME", "")
 tok = AutoTokenizer.from_pretrained(name)
 model = AutoModelForCausalLM.from_pretrained(name, torch_dtype=torch.float32)
 model.eval()

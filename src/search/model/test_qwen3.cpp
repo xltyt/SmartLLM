@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.10.14 20:02:12
+ * Last modified: 2026.10.21 14:51:18
  *
 \****************************************************/
 
@@ -15,17 +15,44 @@
 #include <torch_npu/torch_npu.h>
 #endif
 #include <file_utils.h>
+#include <string_utils.h>
 #include <timer.h>
 #include "utils/model_utils.h"
 #include "model/qwen3.h"
 #include "token/qwen_token.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+namespace {
+
+constexpr int kRefMantissaBits = 7;
+constexpr float kAllowGapUlp = 4.0f;
+constexpr float kMaxAbsLimit = 2.0f;
+
+float binary_ulp(float x, int mantissa_bits = kRefMantissaBits) {
+  if (!std::isfinite(x)) {
+    return std::numeric_limits<float>::infinity();
+  }
+  x = std::fabs(x);
+  if (x == 0.0f) {
+    return std::ldexp(1.0f, -mantissa_bits);
+  }
+  int exp = 0;
+  std::frexp(x, &exp);
+  return std::ldexp(1.0f, exp - 1 - mantissa_bits);
+}
+
+}  // namespace
 
 Qwen3ForCausalLM *_model = NULL;
 void InitModel() {
 	if (_model) {
     return;
   }
-  auto config = nlohmann::json::parse(std::ifstream("/data/Qwen3-0.6B/config.json"));
+  char *model_name_p = getenv("MODEL_NAME");
+  std::string model_name(NULL == model_name_p ? "" : model_name_p);
+  auto config = nlohmann::json::parse(std::ifstream("/data/" + model_name + "/config.json"));
   _model = new Qwen3ForCausalLM(
     config["vocab_size"],
     config["hidden_size"],
@@ -36,7 +63,14 @@ void InitModel() {
     config["intermediate_size"],
     config["rms_norm_eps"]
     );
-  load_module_from_safetensors(*_model, "/data/Qwen3-0.6B/model.safetensors");
+  //load_module_from_safetensors(*_model, "/data/" + model_name + "/model.safetensors");
+  load_module_from_safetensors_dir(*_model, "/data/" + model_name);
+  if (config["tie_word_embeddings"]) {
+    // Exception: a leaf Variable that requires grad is being used in an in-place operation.
+    torch::NoGradGuard no_grad;
+    _model->lm_head->weight.copy_(_model->model->embed_tokens->weight);
+    LOG(INFO) << "Load LM Head Finished";
+  }
   {
     torch::NoGradGuard no_grad;
     for (auto& param : _model->parameters()) {
@@ -50,8 +84,10 @@ void InitModel() {
 }
 
 TEST(Model, Qwen3) {
+  char *model_name_p = getenv("MODEL_NAME");
+  std::string model_name(NULL == model_name_p ? "" : model_name_p);
   auto config = nlohmann::json::parse(
-  std::ifstream("/data/Qwen3-0.6B/config.json"));
+  std::ifstream("/data/" + model_name + "/config.json"));
   int vocab_size = config["vocab_size"];
   int hidden_size = config["hidden_size"];
   int num_layers = config["num_hidden_layers"];
@@ -72,7 +108,8 @@ TEST(Model, Qwen3) {
     intermediate_size,
     rms_norm_eps
     );
-  load_module_from_safetensors(model, "/data/Qwen3-0.6B/model.safetensors");
+  //load_module_from_safetensors(model, "/data/" + model_name + "/model.safetensors");
+  load_module_from_safetensors_dir(model, "/data/" + model_name);
   {
     torch::NoGradGuard no_grad;
     for (auto& param : model.parameters()) {
@@ -316,6 +353,8 @@ TEST(Model, Qwen3Lm) {
 
 TEST(Model, Qwen3Runner) {
   InitModel();
+  char *model_name_p = getenv("MODEL_NAME");
+  std::string model_name(NULL == model_name_p ? "" : model_name_p);
   
   std::string content;
   mycommon::file_read("./test_runner.pt", content);
@@ -340,7 +379,7 @@ TEST(Model, Qwen3Runner) {
   
   uint64_t time_start = mycommon::getMilliTime();
   std::vector<int64_t> current_tokens = ref_input_ids;
-  for (int step = 0; step < max_new_tokens; ++step) {
+  for (int step = 0; step < max_new_tokens - 1; ++step) {
     //auto input_ids = torch::from_blob(
     //  current_tokens.data(), 
     //  {1, static_cast<int64_t>(current_tokens.size())}, 
@@ -364,7 +403,7 @@ TEST(Model, Qwen3Runner) {
   }
   uint64_t time_used = mycommon::getMilliTime() - time_start;
   LOG(INFO) << "Time[" << time_used << "] Input[" << ref_input_ids.size() << "] Output[" << current_tokens.size() << "]";
-  QwenToken token("/data/Qwen3-0.6B/");
+  QwenToken token("/data/" + model_name);
   std::vector<size_t> run_ids;
   for (auto _ : current_tokens) {
     run_ids.push_back(_);
@@ -379,15 +418,20 @@ TEST(Model, Qwen3RunnerCache) {
   LOG(INFO) << "num_interop_threads: " << torch::get_num_interop_threads();
   LOG(INFO) << "MKL available: " << at::hasMKL();
   LOG(INFO) << "MKL-DNN available: " << at::hasMKLDNN();
+  char *model_name_p = getenv("MODEL_NAME");
+  std::string model_name(NULL == model_name_p ? "" : model_name_p);
 
 #if USE_NPU
+  LOG(INFO) << "Init NPU...";
   torch_npu::init_npu("npu:0");
   auto device = at::Device("npu:0");
+  LOG(INFO) << "Init NPU Finished";
 #endif
 
-  auto config = nlohmann::json::parse(std::ifstream("/data/Qwen3-0.6B/config.json"));
+  auto config = nlohmann::json::parse(std::ifstream("/data/" + model_name + "/config.json"));
   int max_seq_len = 2048;
   int batch_size = 1;
+  LOG(INFO) << "Init KV Cache...";
   KVCache *kv_cache = new KVCache(
     config["num_hidden_layers"],
     batch_size,
@@ -405,6 +449,7 @@ TEST(Model, Qwen3RunnerCache) {
     torch::kCPU
 #endif
     );
+  LOG(INFO) << "Init KV Cache Finished";
   Qwen3ForCausalLM *model = new Qwen3ForCausalLM(
     config["vocab_size"],
     config["hidden_size"],
@@ -416,7 +461,25 @@ TEST(Model, Qwen3RunnerCache) {
     config["rms_norm_eps"],
     kv_cache
     );
-  load_module_from_safetensors(*model, "/data/Qwen3-0.6B/model.safetensors");
+  LOG(INFO) << "Init Qwen3ForCausalLM Finished";
+  //load_module_from_safetensors(*model, "/data/Qwen3-0.6B/model.safetensors");
+#if USE_NPU
+  load_module_from_safetensors_dir(*model, "/data/" + model_name);
+	//for (const auto& p : model->named_parameters()) {
+	//  // 随机初始化的 Linear 大约 N(0, 0.02)，预训练权重 std 会大很多
+	//  LOG(INFO) << p.key() << " mean=" << p.value().mean().item<float>() << " std=" << p.value().std().item<float>();
+	//}
+	//LOG(INFO) << "lm_head vs embed close=" << torch::allclose(model->lm_head->weight, model->model->embed_tokens->weight);
+#else
+  load_module_from_safetensors_dir(*model, "/data/" + model_name);
+#endif
+  LOG(INFO) << "Load Model Tensors Finished";
+  if (config["tie_word_embeddings"]) {
+    // Exception: a leaf Variable that requires grad is being used in an in-place operation.
+    torch::NoGradGuard no_grad;
+    model->lm_head->weight.copy_(model->model->embed_tokens->weight);
+    LOG(INFO) << "Load LM Head Finished";
+  }
   {
     torch::NoGradGuard no_grad;
     for (auto& param : model->parameters()) {
@@ -424,6 +487,7 @@ TEST(Model, Qwen3RunnerCache) {
         param.data() = param.data().contiguous();
       }
     }
+    LOG(INFO) << "Contiguous Finished";
   }
   model->eval();
 #if USE_GPU
@@ -450,8 +514,94 @@ TEST(Model, Qwen3RunnerCache) {
 	auto ref_output = data.at("output").toTensor();
   std::vector<int64_t> ref_output_ids(ref_output.data_ptr<int64_t>(), ref_output.data_ptr<int64_t>() + ref_output.numel());
   std::vector<int64_t> ref_input_ids(ids.data_ptr<int64_t>(), ids.data_ptr<int64_t>() + ids.numel());
-  std::vector<int64_t> current_tokens = ref_input_ids;
-  // Prefill
+  ASSERT_TRUE(mycommon::file_exist("./test_runner_logits.pt")) << "Run test_runner.py to generate reference logits";
+  mycommon::file_read("./test_runner_logits.pt", content);
+  auto logits_data = torch::jit::pickle_load(std::vector<char>(content.begin(), content.end())).toGenericDict();
+  auto ref_logits = logits_data.at("logits").toTensor();
+  ASSERT_TRUE(torch::equal(logits_data.at("output").toTensor(), ref_output)) << "Reference logits are stale";
+  ASSERT_EQ(ref_logits.dim(), 2);
+  ASSERT_EQ(ref_logits.size(0), ref_output_ids.size() - ref_input_ids.size());
+  ASSERT_EQ(ref_logits.size(1), config["vocab_size"].get<int64_t>());
+  const int64_t prompt_len = static_cast<int64_t>(ref_input_ids.size());
+  const int64_t gen_len = std::min(
+    static_cast<int64_t>(max_new_tokens),
+    static_cast<int64_t>(ref_output_ids.size()) - prompt_len);
+  ASSERT_EQ(gen_len, ref_logits.size(0));
+
+  std::vector<int64_t> greedy_tokens = ref_input_ids;
+  float max_abs_err = 0.0f;
+  float mean_abs_sum = 0.0f;
+  float max_large_ulp_err = 0.0f;
+  int64_t max_abs_step = -1;
+  int64_t max_ulp_step = -1;
+  int match_count = 0;
+  int allowed_mismatch = 0;
+  int hard_mismatch = 0;
+  int64_t first_mismatch_step = -1;
+
+  auto eval_step = [&](int64_t step, const torch::Tensor& step_logits) {
+    const int64_t expected = ref_output_ids[prompt_len + step];
+    auto scores = step_logits.reshape({-1}).to(torch::kCPU).to(torch::kFloat32);
+    auto ref_scores = ref_logits[step].to(torch::kFloat32);
+    const int64_t selected = torch::argmax(scores).item<int64_t>();
+    greedy_tokens.push_back(selected);
+
+    auto diff = (scores - ref_scores).abs();
+    const float step_max_abs = diff.max().item<float>();
+    const float step_mean_abs = diff.mean().item<float>();
+    mean_abs_sum += step_mean_abs;
+    if (step_max_abs > max_abs_err) {
+      max_abs_err = step_max_abs;
+      max_abs_step = step;
+    }
+
+    const float ref_peak = ref_scores.abs().max().item<float>();
+    const float step_max_ulp = step_max_abs / binary_ulp(std::max(ref_peak, 1.0f));
+    if (step_max_ulp > max_large_ulp_err) {
+      max_large_ulp_err = step_max_ulp;
+      max_ulp_step = step;
+    }
+
+    auto [ref_topk_values, ref_topk_indices] = torch::topk(ref_scores, 2);
+    const float ref_gap = (ref_topk_values[0] - ref_topk_values[1]).item<float>();
+    const float ref_gap_ulp = ref_gap / binary_ulp(ref_topk_values[0].item<float>());
+    const int64_t ref_top1 = ref_topk_indices[0].item<int64_t>();
+    const int64_t ref_top2 = ref_topk_indices[1].item<int64_t>();
+    const bool in_ref_top2 = selected == ref_top1 || selected == ref_top2;
+    const bool mismatch = selected != expected;
+    if (!mismatch) {
+      ++match_count;
+      return selected;
+    }
+    if (first_mismatch_step < 0) {
+      first_mismatch_step = step;
+    }
+    const bool allowed = in_ref_top2 && ref_gap_ulp <= kAllowGapUlp;
+    if (allowed) {
+      ++allowed_mismatch;
+    } else {
+      ++hard_mismatch;
+    }
+    auto [actual_topk_values, actual_topk_indices] = torch::topk(scores, 2);
+    LOG(INFO) << (allowed ? "Allowed" : "Hard")
+              << " mismatch step[" << step << "] expected[" << expected
+              << "] selected[" << selected << "] in_ref_top2[" << in_ref_top2
+              << "] ref_gap[" << ref_gap << "] ref_gap_ulp[" << ref_gap_ulp << "]";
+    LOG(INFO) << "Reference Top2[" << ref_top1 << ":"
+              << ref_topk_values[0].item<float>() << ", " << ref_top2 << ":"
+              << ref_topk_values[1].item<float>() << "]";
+    LOG(INFO) << "Actual Top2[" << actual_topk_indices[0].item<int64_t>() << ":"
+              << actual_topk_values[0].item<float>() << ", "
+              << actual_topk_indices[1].item<int64_t>() << ":"
+              << actual_topk_values[1].item<float>() << "]";
+    LOG(INFO) << "Candidate delta expected["
+              << scores[expected].item<float>() - ref_scores[expected].item<float>()
+              << "] selected["
+              << scores[selected].item<float>() - ref_scores[selected].item<float>()
+              << "]";
+    return selected;
+  };
+
   uint64_t time_start = mycommon::getMilliTime();
   auto logits = model->forward(
     ref_input_ids,
@@ -460,38 +610,51 @@ TEST(Model, Qwen3RunnerCache) {
     );
   uint64_t time_prefill = mycommon::getMilliTime() - time_start;
   time_start = mycommon::getMilliTime();
-  auto next_token_tensor = torch::argmax(logits.squeeze(0).squeeze(0), /*dim=*/-1);
-  int64_t next_token = next_token_tensor.item<int64_t>();
-  current_tokens.push_back(next_token);
-  // Decode
-  for (int step = 0; step < max_new_tokens; ++step) {
-    LOG(INFO) << "Step[" << step << "] Token[" << next_token << "]";
-    if (next_token == 151643 || next_token == 151645) {
-      LOG(INFO) << "EOS End";
+  eval_step(0, logits);
+  int64_t feed = ref_output_ids[prompt_len];
+  for (int64_t step = 1; step < gen_len; ++step) {
+    if (feed == 151643 || feed == 151645) {
+      LOG(INFO) << "EOS End at teacher-force step[" << step - 1 << "]";
       break;
     }
-    int64_t current_pos = ref_input_ids.size() + step;
-    logits = model->forward({next_token}, /*logits_to_keep=*/1, current_pos);
-    next_token_tensor = torch::argmax(logits.squeeze(0).squeeze(0), /*dim=*/-1);
-    next_token = next_token_tensor.item<int64_t>();
-    current_tokens.push_back(next_token);
+    logits = model->forward({feed}, /*logits_to_keep=*/1, prompt_len + step - 1);
+    eval_step(step, logits);
+    feed = ref_output_ids[prompt_len + step];
   }
   uint64_t time_decode = mycommon::getMilliTime() - time_start;
-  LOG(INFO) << "TTFT[" << time_prefill << "] " <<
-               "Decode Time[" << time_decode << "] " <<
-               "TPOT[" << ((float)time_decode / current_tokens.size()) << "] " <<
-               "PrefillPerf[" << ((float)ref_input_ids.size() * 1000 / time_prefill) << "] " <<
-               "OutPerf[" << ((float)current_tokens.size() * 1000 / time_decode) << "] " <<
-               "Input[" << ref_input_ids.size() << "] " <<
-               "Output[" << current_tokens.size() << "]";
-  QwenToken token("/data/Qwen3-0.6B/");
+  const int eval_steps = match_count + allowed_mismatch + hard_mismatch;
+  const float mean_abs_err = mean_abs_sum / std::max(eval_steps, 1);
+  LOG(INFO) << "TTFT[" << time_prefill << "] "
+            << "Decode Time[" << time_decode << "] "
+            << "TPOT[" << ((float)time_decode / greedy_tokens.size()) << "] "
+            << "PrefillPerf[" << ((float)prompt_len * 1000 / time_prefill) << "] "
+            << "OutPerf[" << ((float)greedy_tokens.size() * 1000 / time_decode) << "] "
+            << "Input[" << prompt_len << "] "
+            << "Output[" << greedy_tokens.size() << "]";
+  LOG(INFO) << "Eval match[" << match_count
+            << "] allowed_mismatch[" << allowed_mismatch
+            << "] hard_mismatch[" << hard_mismatch
+            << "] first_mismatch_step[" << first_mismatch_step
+            << "] max_abs[" << max_abs_err << "]@step[" << max_abs_step
+            << "] mean_abs[" << mean_abs_err
+            << "] max_ulp_at_peak[" << max_large_ulp_err << "]@step[" << max_ulp_step
+            << "] allow_gap_ulp[" << kAllowGapUlp << "]";
+  QwenToken token("/data/" + model_name);
   std::vector<size_t> run_ids;
-  for (auto _ : current_tokens) {
-    run_ids.push_back(_);
+  for (auto id : greedy_tokens) {
+    run_ids.push_back(static_cast<size_t>(id));
   }
-  std::string my_text = token.decode(run_ids);
-  LOG(INFO) << my_text;
-  ASSERT_EQ(current_tokens, ref_output_ids);
+  std::vector<size_t> ref_run_ids;
+  for (auto id : ref_output_ids) {
+    ref_run_ids.push_back(static_cast<size_t>(id));
+  }
+  LOG(INFO) << "Ori[" << token.decode(ref_run_ids) << "]";
+  LOG(INFO) << "Our[" << token.decode(run_ids) << "]";
+  LOG(INFO) << "Ori[" << mycommon::str_join(ref_output_ids) << "]";
+  LOG(INFO) << "Our[" << mycommon::str_join(greedy_tokens) << "]";
+  EXPECT_EQ(hard_mismatch, 0) << "Greedy argmax left reference top2 while top2 gap was > "
+                              << kAllowGapUlp << " ULP";
+  EXPECT_LE(max_abs_err, kMaxAbsLimit) << "Teacher-force logits max abs error too large";
 #if USE_NPU
   torch_npu::finalize_npu();
 #endif

@@ -5,10 +5,11 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import sys
 import time
+import os
 
-name = "/data/Qwen3-0.6B"
+name = "/data/" + os.getenv("MODEL_NAME", "")
 tok = AutoTokenizer.from_pretrained(name)
-model = AutoModelForCausalLM.from_pretrained(name, torch_dtype=torch.float32, attn_implementation="eager")
+model = AutoModelForCausalLM.from_pretrained(name, torch_dtype=torch.bfloat16, attn_implementation="eager")
 model.eval()
 
 #ids = tok("中国的首都是哪里，和美国的首都对比一下", return_tensors="pt").input_ids
@@ -22,16 +23,29 @@ prompt_text = tok.apply_chat_template(
 )
 ids = tok(prompt_text, return_tensors="pt").input_ids
 
+reference_logits = []
+def capture_logits(module, args, output):
+  reference_logits.append(output.logits[0, -1, :].detach().cpu().clone())
+
+hook = model.register_forward_hook(capture_logits)
 time_start = time.time()
-generate_ids = model.generate(ids, max_length=200, do_sample=False)
+with torch.inference_mode():
+  generate_ids = model.generate(ids, max_new_tokens=200, do_sample=False)
+hook.remove()
 time_used = time.time() - time_start
 print(f"Time[{time_used}]")
 text = tok.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
 print(text)
 
+assert len(reference_logits) == generate_ids.size(1) - ids.size(1)
 torch.save({
   "ids": ids,
   "output": generate_ids,
-  "max_length": 100
+  "max_length": 200
   },
   "test_runner.pt")
+torch.save({
+  "output": generate_ids,
+  "logits": torch.stack(reference_logits),
+  },
+  "test_runner_logits.pt")

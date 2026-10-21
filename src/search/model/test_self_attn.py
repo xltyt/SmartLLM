@@ -4,6 +4,7 @@
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import sys
+import os
 
 '''
 Prefill 阶段明明需要因果遮蔽，传入的却是 None？
@@ -19,7 +20,7 @@ Prefill 阶段明明需要因果遮蔽，传入的却是 None？
 4. 底层的 FlashAttention / Cutlass 算子看到 is_causal=True，在 GPU/NPU 计算时自动跳过上三角，数学上等价于加了下三角掩码，但在物理上根本没有这个张量。
 '''
 
-name = "/data/Qwen3-0.6B"
+name = "/data/" + os.getenv("MODEL_NAME", "")
 tok = AutoTokenizer.from_pretrained(name)
 model = AutoModelForCausalLM.from_pretrained(name, torch_dtype=torch.float32, attn_implementation="eager")
 model.eval()

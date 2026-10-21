@@ -1,13 +1,16 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.18 18:08:24
+ * Last modified: 2026.10.15 13:22:37
  *
 \****************************************************/
 
 #include "model_utils.h"
 #include <safetensors.hh>
 #include <fstream>
+#include <nlohmann/json.hpp>
+#include <file_utils.h>
+#include <string_utils.h>
 
 static torch::ScalarType convert_dtype(safetensors::dtype dtype) {
   switch (dtype) {
@@ -25,7 +28,8 @@ static torch::ScalarType convert_dtype(safetensors::dtype dtype) {
   }
 }
 
-void load_module_from_safetensors(torch::nn::Module& module, const std::string& file_path) {
+void load_module_from_safetensors(torch::nn::Module& module, const std::string& file_path, bool strict /*= true*/) {
+  LOG(INFO) << "Loading[" << file_path << "]...";
   // Parse
   std::string warn;
   std::string err;
@@ -71,7 +75,12 @@ void load_module_from_safetensors(torch::nn::Module& module, const std::string& 
   auto load_tensor = [&](const std::string& name, torch::Tensor dst) {
     auto it = weight_map.find(name);
     if (it == weight_map.end()) {
-      throw std::runtime_error(name + " not found in safetensors");
+      if (strict) {
+        throw std::runtime_error(name + " not found in safetensors");
+      }
+      else {
+        return;
+      }
     }
     if (it->second.sizes() != dst.sizes()) {
       throw std::runtime_error("shape mismatch: " + name);
@@ -80,12 +89,30 @@ void load_module_from_safetensors(torch::nn::Module& module, const std::string& 
   };
 
   for (auto& p : module.named_parameters()) {
+    //LOG(INFO) << "Load Key[" << p.key() << "]";
     load_tensor(p.key(), p.value());
   }
   for (auto& b : module.named_buffers()) {
     if (weight_map.count(b.key())) {
       load_tensor(b.key(), b.value());
     }
+  }
+}
+
+void load_module_from_safetensors_dir(torch::nn::Module& module, const std::string& dir_path, bool strict /*= true*/) {
+  LOG(INFO) << "Loading[" << dir_path << "]...";
+  const std::string& index_path = dir_path + "/model.safetensors.index.json";
+  if (!mycommon::file_exist(index_path)) {
+    load_module_from_safetensors(module, dir_path + "/model.safetensors");
+    return;
+  }
+  auto config = nlohmann::json::parse(std::ifstream(index_path));
+  std::set<std::string> files;
+  for (auto& [name, file] : config["weight_map"].items()) {
+    files.insert(file.get<std::string>());
+  }
+  for (auto& f : files) {
+    load_module_from_safetensors(module, dir_path + "/" + f, false);
   }
 }
 

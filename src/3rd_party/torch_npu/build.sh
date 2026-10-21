@@ -45,7 +45,7 @@ CANN_VERSIONS=(12.2)
 for CANN_VERSION in "${CANN_VERSIONS[@]}"; do
   if [ ! -d $DST/torch/npu/${CANN_VERSION}/lib ]; then
     if [ "$PLATFORM" = "arm" ]; then
-      #python3 build_libtorch_npu.py
+      python3 build_libtorch_npu.py
       rm -rf $DST/torch_npu
       cp -r libtorch_npu/ $DST/torch_npu
     else

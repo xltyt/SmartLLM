@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.18 18:08:34
+ * Last modified: 2026.10.15 11:54:08
  *
 \****************************************************/
 
@@ -12,7 +12,9 @@
 #include <torch/torch.h>
 #include <glog/logging.h>
 
-void load_module_from_safetensors(torch::nn::Module& module, const std::string& file_path);
+void load_module_from_safetensors(torch::nn::Module& module, const std::string& file_path, bool strict = true);
+
+void load_module_from_safetensors_dir(torch::nn::Module& module, const std::string& dir_path, bool strict = true);
 
 struct TensorPrintOptions {
   int precision = 4;
