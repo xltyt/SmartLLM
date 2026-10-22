@@ -25,7 +25,8 @@ public:
     int num_kv_heads,
     int head_dim,
     float rms_norm_eps,
-    KVCache *kv_cache = NULL
+    KVCache *kv_cache = NULL,
+    torch::TensorOptions tensor_options = torch::TensorOptions()
     );
   virtual ~Qwen3Attention();
 
@@ -52,7 +53,11 @@ private:
 
 class Qwen3MLP : public torch::nn::Module {
 public:
-  Qwen3MLP(int hidden_size, int intermediate_size);
+  Qwen3MLP(
+    int hidden_size,
+    int intermediate_size,
+    torch::TensorOptions tensor_options = torch::TensorOptions()
+    );
   virtual ~Qwen3MLP();
   
 public:  
@@ -73,7 +78,8 @@ public:
     int head_dim,
     int intermediate_size,
     float rms_norm_eps,
-    KVCache *kv_cache = NULL
+    KVCache *kv_cache = NULL,
+    torch::TensorOptions tensor_options = torch::TensorOptions()
     );
   virtual ~Qwen3DecoderLayer();
 
@@ -97,7 +103,8 @@ class Qwen3RotaryEmbedding : public torch::nn::Module {
 public:
   Qwen3RotaryEmbedding(
     int64_t head_dim,
-    double rope_theta = 1000000.0);
+    double rope_theta = 1000000.0,
+    torch::Device device = torch::kCPU);
 
   //
   //  Computes the inverse frequencies according to the original RoPE implementation
@@ -141,7 +148,8 @@ public:
     int head_dim,
     int intermediate_size,
     float rms_norm_eps,
-    KVCache *kv_cache = NULL
+    KVCache *kv_cache = NULL,
+    torch::TensorOptions tensor_options = torch::TensorOptions()
     );
   virtual ~Qwen3Model();
   
@@ -173,7 +181,8 @@ public:
     int head_dim,
     int intermediate_size,
     float rms_norm_eps,
-    KVCache *kv_cache = NULL
+    KVCache *kv_cache = NULL,
+    torch::TensorOptions tensor_options = torch::TensorOptions()
     );
   virtual ~Qwen3ForCausalLM();
 

@@ -1,5 +1,6 @@
 CURRENT_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 CURRENT_DIR := $(shell dirname $(CURRENT_PATH))
+ARCH := $(shell uname -m)
 
 THIRD_DIR := $(CURRENT_DIR)/../../local
 
@@ -35,7 +36,9 @@ else
 	@if [ ! -d ../../$(PLATFORM)/local/torch/cpu/include ]; then          cd torch && PLATFORM=$(PLATFORM) bash build.sh; fi
 endif
 ifeq ($(PLATFORM),arm)
+  ifeq ($(ARCH), aarch64)
 	@if [ ! -d ../../$(PLATFORM)/local/torch_npu/include ]; then          cd torch_npu && PLATFORM=$(PLATFORM) bash build.sh; fi
+  endif
 endif
 	@if [ ! -d ../../$(PLATFORM)/local/include/eigen3 ]; then             cd eigen && PLATFORM=$(PLATFORM) bash build.sh; fi
 	@if [ ! -f ../../$(PLATFORM)/local/include/safetensors.hh ]; then     cd safetensors-cpp && PLATFORM=$(PLATFORM) bash build.sh; fi

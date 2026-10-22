@@ -11,6 +11,35 @@
 #include <torch_npu/csrc/aten/CustomFunctions.h>
 #endif
 
+namespace {
+
+torch::nn::Linear make_linear(
+    int64_t in_features,
+    int64_t out_features,
+    const torch::TensorOptions& options,
+    bool bias = false) {
+  auto linear = torch::nn::Linear(torch::nn::LinearOptions(1, 1).bias(bias));
+  torch::NoGradGuard no_grad;
+  linear->options = torch::nn::LinearOptions(in_features, out_features).bias(bias);
+  linear->weight.set_data(torch::empty({out_features, in_features}, options));
+  if (bias) {
+    linear->bias.set_data(torch::empty({out_features}, options));
+  }
+  return linear;
+}
+
+torch::nn::Embedding make_embedding(
+    int64_t num_embeddings,
+    int64_t embedding_dim,
+    const torch::TensorOptions& options) {
+  auto embedding = torch::nn::Embedding(1, 1);
+  torch::NoGradGuard no_grad;
+  embedding->weight.set_data(torch::empty({num_embeddings, embedding_dim}, options));
+  return embedding;
+}
+
+}  // namespace
+
 // ============ Attention ============
 Qwen3Attention::Qwen3Attention(
   int hidden_size,
@@ -18,21 +47,22 @@ Qwen3Attention::Qwen3Attention(
   int num_kv_heads,
   int head_dim,
   float rms_norm_eps,
-  KVCache *kv_cache /*= NULL*/
+  KVCache *kv_cache /*= NULL*/,
+  torch::TensorOptions tensor_options /*= torch::TensorOptions()*/
   ) {
   //int head_dim = hidden_size / num_heads;
   //LOG(INFO) << "Qwen3Attention hidden_size[" << hidden_size << "] num_heads[" << num_heads << "] head_dim[" << head_dim << "]";
-  this->q_proj = register_module("q_proj", torch::nn::Linear(
-    torch::nn::LinearOptions(hidden_size, num_heads * head_dim).bias(false)
+  this->q_proj = register_module("q_proj", make_linear(
+    hidden_size, num_heads * head_dim, tensor_options, false
     ));
-  this->k_proj = register_module("k_proj", torch::nn::Linear(
-    torch::nn::LinearOptions(hidden_size, num_kv_heads * head_dim).bias(false)
+  this->k_proj = register_module("k_proj", make_linear(
+    hidden_size, num_kv_heads * head_dim, tensor_options, false
     ));
-  this->v_proj = register_module("v_proj", torch::nn::Linear(
-    torch::nn::LinearOptions(hidden_size, num_kv_heads * head_dim).bias(false)
+  this->v_proj = register_module("v_proj", make_linear(
+    hidden_size, num_kv_heads * head_dim, tensor_options, false
     ));
-  this->o_proj = register_module("o_proj", torch::nn::Linear(
-    torch::nn::LinearOptions(num_heads * head_dim, hidden_size).bias(false)
+  this->o_proj = register_module("o_proj", make_linear(
+    num_heads * head_dim, hidden_size, tensor_options, false
     ));
   this->q_norm = register_module("q_norm", std::make_shared<RMSNorm>(head_dim, rms_norm_eps));
   this->k_norm = register_module("k_norm", std::make_shared<RMSNorm>(head_dim, rms_norm_eps));
@@ -158,9 +188,9 @@ static void enable_gpu_flash_sdp_once() {
     if (enabled) {
         return;
     }
-    at::globalContext().setUserEnabledFlashSDP(true);
-    at::globalContext().setUserEnabledMemEfficientSDP(false);
-    at::globalContext().setUserEnabledMathSDP(false);
+    at::globalContext().setSDPUseFlash(true);
+    at::globalContext().setSDPUseMemEfficient(false);
+    at::globalContext().setSDPUseMath(false);
     enabled = true;
 }
 
@@ -366,15 +396,19 @@ public:
   }
 };
 
-Qwen3MLP::Qwen3MLP(int hidden_size, int intermediate_size) {
-  this->gate_proj = register_module("gate_proj", torch::nn::Linear(
-    torch::nn::LinearOptions(hidden_size, intermediate_size).bias(false)
+Qwen3MLP::Qwen3MLP(
+  int hidden_size,
+  int intermediate_size,
+  torch::TensorOptions tensor_options /*= torch::TensorOptions()*/
+  ) {
+  this->gate_proj = register_module("gate_proj", make_linear(
+    hidden_size, intermediate_size, tensor_options, false
     ));
-  this->up_proj = register_module("up_proj", torch::nn::Linear(
-    torch::nn::LinearOptions(hidden_size, intermediate_size).bias(false)
+  this->up_proj = register_module("up_proj", make_linear(
+    hidden_size, intermediate_size, tensor_options, false
     ));
-  this->down_proj = register_module("down_proj", torch::nn::Linear(
-    torch::nn::LinearOptions(intermediate_size, hidden_size).bias(false)
+  this->down_proj = register_module("down_proj", make_linear(
+    intermediate_size, hidden_size, tensor_options, false
     ));
 }
 
@@ -394,7 +428,8 @@ Qwen3DecoderLayer::Qwen3DecoderLayer(
   int head_dim,
   int intermediate_size,
   float rms_norm_eps,
-  KVCache *kv_cache /*= NULL*/
+  KVCache *kv_cache /*= NULL*/,
+  torch::TensorOptions tensor_options /*= torch::TensorOptions()*/
   ) {
   this->input_layernorm = register_module("input_layernorm", std::make_shared<RMSNorm>(hidden_size, rms_norm_eps));
   this->self_attn = register_module("self_attn", std::make_shared<Qwen3Attention>(
@@ -403,10 +438,11 @@ Qwen3DecoderLayer::Qwen3DecoderLayer(
     num_kv_heads,
     head_dim,
     rms_norm_eps,
-    kv_cache
+    kv_cache,
+    tensor_options
     ));
   this->post_attention_layernorm = register_module("post_attention_layernorm", std::make_shared<RMSNorm>(hidden_size, rms_norm_eps));
-  this->mlp = register_module("mlp", std::make_shared<Qwen3MLP>(hidden_size, intermediate_size));
+  this->mlp = register_module("mlp", std::make_shared<Qwen3MLP>(hidden_size, intermediate_size, tensor_options));
 }
 
 Qwen3DecoderLayer::~Qwen3DecoderLayer() {
@@ -467,13 +503,9 @@ torch::Tensor Qwen3DecoderLayer::forward(
 // ============ RotaryEmbedding ============
 Qwen3RotaryEmbedding::Qwen3RotaryEmbedding(
   int64_t head_dim,
-  double rope_theta /*= 1000000.0*/
+  double rope_theta /*= 1000000.0*/,
+  torch::Device device /*= torch::kCPU*/
   ) {
-#if USE_GPU
-  torch::Device device = torch::kCUDA;
-#else
-  torch::Device device = torch::kCPU;
-#endif
   auto [computed_inv_freq, factor] = compute_default_rope_parameters(head_dim, rope_theta, device);
   _attention_scaling = factor;
 
@@ -486,12 +518,9 @@ std::tuple<torch::Tensor, double> Qwen3RotaryEmbedding::compute_default_rope_par
   double rope_theta,
   torch::Device device) {
   
-  auto arange_tensor = torch::arange(0, head_dim, 2, torch::device(device).dtype(torch::kInt64));
-
+  auto arange_tensor = torch::arange(0, head_dim, 2, torch::dtype(torch::kInt64));
   auto exponent = arange_tensor.to(torch::kFloat32) / static_cast<double>(head_dim);
-
   auto inv_freq = 1.0 / torch::pow(rope_theta, exponent);
-  
   double attention_factor = 1.0;
   return std::make_tuple(inv_freq, attention_factor);
 }
@@ -550,9 +579,12 @@ Qwen3Model::Qwen3Model(
   int head_dim,
   int intermediate_size,
   float rms_norm_eps,
-  KVCache *kv_cache /*= NULL*/
+  KVCache *kv_cache /*= NULL*/,
+  torch::TensorOptions tensor_options /*= torch::TensorOptions()*/
   ) {
-  this->embed_tokens = register_module("embed_tokens", torch::nn::Embedding(vocab_size, hidden_size));
+  this->embed_tokens = register_module("embed_tokens", make_embedding(
+    vocab_size, hidden_size, tensor_options
+    ));
 
   this->layers = register_module("layers", torch::nn::ModuleList());
   for (int i = 0; i < num_layers; i++) {
@@ -563,13 +595,14 @@ Qwen3Model::Qwen3Model(
       head_dim,
       intermediate_size,
       rms_norm_eps,
-      kv_cache
+      kv_cache,
+      tensor_options
       ));
   }
 
   this->norm = register_module("norm", std::make_shared<RMSNorm>(hidden_size, rms_norm_eps));
     
-  this->rotary_emb = std::make_shared<Qwen3RotaryEmbedding>(head_dim);
+  this->rotary_emb = std::make_shared<Qwen3RotaryEmbedding>(head_dim, 1000000.0, tensor_options.device());
 }
 
 Qwen3Model::~Qwen3Model() {
@@ -643,7 +676,8 @@ Qwen3ForCausalLM::Qwen3ForCausalLM(
   int head_dim,
   int intermediate_size,
   float rms_norm_eps,
-  KVCache *kv_cache /*= NULL*/
+  KVCache *kv_cache /*= NULL*/,
+  torch::TensorOptions tensor_options /*= torch::TensorOptions()*/
   ) {
   this->model = register_module("model", std::make_shared<Qwen3Model>(
     vocab_size,
@@ -654,11 +688,12 @@ Qwen3ForCausalLM::Qwen3ForCausalLM(
     head_dim,
     intermediate_size,
     rms_norm_eps,
-    kv_cache
+    kv_cache,
+    tensor_options
     ));
 
-  this->lm_head = register_module("lm_head", torch::nn::Linear(
-    torch::nn::LinearOptions(hidden_size, vocab_size).bias(false)
+  this->lm_head = register_module("lm_head", make_linear(
+    hidden_size, vocab_size, tensor_options, false
     ));
 }
 

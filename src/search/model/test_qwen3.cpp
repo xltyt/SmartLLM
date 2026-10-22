@@ -471,6 +471,13 @@ class Qwen3RunnerCache : public ::testing::Test {
 #endif
       );
     LOG(INFO) << "Init KV Cache Finished";
+#if USE_GPU
+    auto tensor_options = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA);
+#elif USE_NPU
+    auto tensor_options = torch::TensorOptions().dtype(torch::kBFloat16).device(device);
+#else
+    auto tensor_options = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
+#endif
     model = new Qwen3ForCausalLM(
       config["vocab_size"],
       config["hidden_size"],
@@ -480,7 +487,8 @@ class Qwen3RunnerCache : public ::testing::Test {
       config["head_dim"],
       config["intermediate_size"],
       config["rms_norm_eps"],
-      kv_cache
+      kv_cache,
+      tensor_options
       );
     LOG(INFO) << "Init Qwen3ForCausalLM Finished";
     load_module_from_safetensors_dir(*model, "/data/" + model_name);
