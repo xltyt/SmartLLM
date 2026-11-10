@@ -1,6 +1,7 @@
 CURRENT_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 CURRENT_DIR := $(shell dirname $(CURRENT_PATH))
 ARCH := $(shell uname -m)
+CPU_COUNT := 4
 
 all : prep
 
@@ -14,15 +15,17 @@ prep:
 ifeq ($(ARCH), x86_64)
 	@echo "\033[32m=====> Build amd64...\033[0m"
 	make -C 3rd_party
-	make -C common
-	make -C search
-	MODE=gpu make -j16 -C search
+	make -C common -j$(CPU_COUNT)
+	make -C search -j$(CPU_COUNT)
+	MODE=gpu make -j16 -C search -j$(CPU_COUNT)
 endif
 	@echo "\033[32m=====> Build arm...\033[0m"
 	PLATFORM=arm make -C 3rd_party
-	PLATFORM=arm make -C common
-	PLATFORM=arm make -C search
-	MODE=npu PLATFORM=arm make -j16 -C search
+	PLATFORM=arm make -C common -j$(CPU_COUNT)
+	PLATFORM=arm make -C search -j$(CPU_COUNT)
+ifeq ($(ARCH), aarch64)
+	MODE=npu PLATFORM=arm make -j16 -C search -j$(CPU_COUNT)
+endif
 	@echo "\033[32m=====> Build Done\033[0m"
 
 clean:

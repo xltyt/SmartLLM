@@ -1,11 +1,14 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.22 10:07:43
+ * Last modified: 2026.10.22 15:34:50
  *
 \****************************************************/
 
 #include "layer_norm.h"
+#if USE_NPU
+#include <torch_npu/csrc/aten/CustomFunctions.h>
+#endif
   
 RMSNorm::RMSNorm(int hidden_size, float eps /*= 1e-6*/) {
 	_weight = register_parameter("weight", torch::ones({hidden_size}));
@@ -16,7 +19,15 @@ RMSNorm::~RMSNorm() {
 }
 
 torch::Tensor RMSNorm::forward(torch::Tensor x) {
-	//return rms_forward(x);
+#if USE_NPU
+  if (x.device().is_privateuseone()) {
+    return std::get<0>(at_npu::native::custom_ops::npu_rms_norm(
+      x,
+      _weight,
+      _eps
+      ));
+  }
+#endif
 	auto input_dtype = x.dtype();
 	auto x_f32 = x.to(torch::kFloat32);
 	auto variance = x_f32.pow(2).mean(-1, true);

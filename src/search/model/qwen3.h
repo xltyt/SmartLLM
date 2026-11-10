@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2020 All Rights Reserved
- * Last modified: 2026.09.29 19:59:33
+ * Last modified: 2026.11.09 20:47:54
  *
 \****************************************************/
 
@@ -30,6 +30,8 @@ public:
     );
   virtual ~Qwen3Attention();
 
+public:
+  void prepare_fused_weights();
   std::tuple<torch::Tensor, torch::Tensor> forward(
     const torch::Tensor& hidden_states,
     const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
@@ -49,6 +51,7 @@ private:
 	double _scaling = 0;
 	int _num_key_value_groups = 0;
   KVCache *_kv_cache = NULL;
+  torch::Tensor _qkv_weight;
 };
 
 class Qwen3MLP : public torch::nn::Module {
@@ -61,12 +64,14 @@ public:
   virtual ~Qwen3MLP();
   
 public:  
+  void prepare_fused_weights();
   torch::Tensor forward(const torch::Tensor& x);
 
 private:
   torch::nn::Linear gate_proj{nullptr};
   torch::nn::Linear up_proj{nullptr};
   torch::nn::Linear down_proj{nullptr};
+  torch::Tensor _gate_up_weight;
 };
 
 class Qwen3DecoderLayer : public torch::nn::Module {
@@ -154,6 +159,7 @@ public:
   virtual ~Qwen3Model();
   
 public:
+  void prepare_fused_weights();
   std::tuple<torch::Tensor, torch::Tensor> prepare(
     const std::vector<int64_t>& input_ids,
     int start_pos = 0
@@ -187,6 +193,7 @@ public:
   virtual ~Qwen3ForCausalLM();
 
 public:
+  void prepare_fused_weights();
   torch::Tensor forward(
     const std::vector<int64_t>& input_ids,
     int logits_to_keep = 1,

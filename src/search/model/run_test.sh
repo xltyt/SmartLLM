@@ -18,7 +18,6 @@ source /data/local/conda_env.sh
 conda activate test
 cd ${ROOT_DIR}/${ARCH_NAME}/test/
 # Arm Default 1, Must Set
-export OMP_NUM_THREADS=32
 
 #MODEL_NAMES=(Qwen3-0.6B Qwen3-4B)
 #MODEL_NAMES=(Qwen3-4B)
@@ -27,6 +26,8 @@ for MODEL_NAME in "${MODEL_NAMES[@]}"; do
   mkdir -p ${MODEL_NAME}
   cd ${MODEL_NAME}
   if [ $BASE -eq 1 ]; then
+    export OMP_NUM_THREADS=32
+    
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_emb.py
     MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelEmb
     
@@ -61,6 +62,8 @@ for MODEL_NAME in "${MODEL_NAMES[@]}"; do
   if [ ! -f ./test_runner.pt ] || [ ! -f ./test_runner_logits.pt ]; then
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_runner.py || exit 1
   fi
+    
+  export OMP_NUM_THREADS=1
   which nvidia-smi &> /dev/null
   if [ $? -eq 0 ]; then
     MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/gpu/12.2/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_gpu_12.2 --gtest_filter=Qwen3RunnerCache.*

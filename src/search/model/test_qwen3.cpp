@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.10.21 14:51:18
+ * Last modified: 2026.11.09 20:49:41
  *
 \****************************************************/
 
@@ -514,6 +514,7 @@ class Qwen3RunnerCache : public ::testing::Test {
 #elif USE_NPU
     model->to(device);
     model->to(torch::kBFloat16);
+    model->prepare_fused_weights();
 #else
     model->to(torch::kHalf);
 #endif

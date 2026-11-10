@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.09.22 10:01:21
+ * Last modified: 2026.11.09 20:01:25
  *
 \****************************************************/
 
@@ -24,6 +24,9 @@ public:
 	}
 	torch::Tensor get_weight() const {
 		return _weight;
+	}
+	float get_eps() const {
+		return _eps;
 	}
 
 private:

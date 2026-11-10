@@ -108,6 +108,15 @@ inline std::pair<torch::Tensor, torch::Tensor> apply_rotary_pos_emb(
     const torch::Tensor& cos,
     const torch::Tensor& sin) 
 {
+#if USE_NPU
+    if (query.device().is_privateuseone()) {
+      auto cos_npu = cos.dim() == 3 ? cos.unsqueeze(1) : cos;  // [B, S, D] -> [B, 1, S, D]
+      auto sin_npu = sin.dim() == 3 ? sin.unsqueeze(1) : sin;
+      auto q_embed = at_npu::native::custom_ops::npu_rotary_mul(query, cos_npu, sin_npu, "half");
+      auto k_embed = at_npu::native::custom_ops::npu_rotary_mul(key, cos_npu, sin_npu, "half");
+      return {q_embed, k_embed};
+    }
+#endif
     // cos, sin 形状通常为 [batch, 1, seq_len, head_dim] 或 [1, 1, seq_len, head_dim]
     auto q_embed = (query * cos) + (rotate_half(query) * sin);
     auto k_embed = (key * cos) + (rotate_half(key) * sin);
@@ -243,9 +252,12 @@ inline std::pair<torch::Tensor, torch::Tensor> npu_flash_attention_forward(
         scaling = 1.0 / std::sqrt(static_cast<double>(query.size(-1)));
     }
 
-    auto q = query.contiguous();
-    auto k = key.contiguous();
-    auto v = value.contiguous();
+    //auto q = query.contiguous();
+    //auto k = key.contiguous();
+    //auto v = value.contiguous();
+    auto q = query;
+    auto k = key;
+    auto v = value;
     const int64_t num_heads = q.size(1);
     const int64_t num_kv_heads = k.size(1);
     std::optional<at::Tensor> atten_mask;
@@ -301,6 +313,15 @@ inline std::pair<torch::Tensor, torch::Tensor> npu_flash_attention_forward(
     return {attn_output, torch::Tensor()};
 }
 #endif
+  
+void Qwen3Attention::prepare_fused_weights() {
+#if USE_NPU
+  if (!_qkv_weight.defined()) {
+    torch::NoGradGuard no_grad;
+    _qkv_weight = torch::cat({this->q_proj->weight, this->k_proj->weight, this->v_proj->weight}, /*dim=*/0);
+  }
+#endif
+}
 
 std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
   const torch::Tensor& hidden_states,
@@ -314,16 +335,29 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
   int64_t seq_len = hidden_states.size(1);
   std::vector<int64_t> hidden_shape = {batch_size, seq_len, -1, _head_dim};
 
-  //LOG(INFO) << "Attention forward Q";
-  auto q_projected = this->q_proj->forward(hidden_states).view(hidden_shape);
+  torch::Tensor q_projected;
+  torch::Tensor k_projected;
+  torch::Tensor value_states;
+#if USE_NPU
+  if (hidden_states.device().is_privateuseone()) {
+    // auto q_projected = this->q_proj->forward(hidden_states).view(hidden_shape);
+    // auto k_projected = this->k_proj->forward(hidden_states).view(hidden_shape);
+    // auto value_states = this->v_proj->forward(hidden_states).view(hidden_shape).transpose(1, 2);
+    auto qkv = torch::linear(hidden_states, _qkv_weight);
+    const int64_t q_out = this->q_proj->weight.size(0);
+    const int64_t k_out = this->k_proj->weight.size(0);
+    q_projected = qkv.slice(-1, 0, q_out).contiguous().view(hidden_shape);
+    k_projected = qkv.slice(-1, q_out, q_out + k_out).contiguous().view(hidden_shape);
+    value_states = qkv.slice(-1, q_out + k_out, qkv.size(-1)).contiguous().view(hidden_shape).transpose(1, 2);
+  } else
+#endif
+  {
+    q_projected = this->q_proj->forward(hidden_states).view(hidden_shape);
+    k_projected = this->k_proj->forward(hidden_states).view(hidden_shape);
+    value_states = this->v_proj->forward(hidden_states).view(hidden_shape).transpose(1, 2);
+  }
   auto query_states = this->q_norm->forward(q_projected).transpose(1, 2);
-
-  auto k_projected = this->k_proj->forward(hidden_states).view(hidden_shape);
   auto key_states = this->k_norm->forward(k_projected).transpose(1, 2);
-  //auto key_states = this->k_proj->forward(hidden_states).view(hidden_shape).transpose(1, 2);
-
-  //LOG(INFO) << "Attention forward V";
-  auto value_states = this->v_proj->forward(hidden_states).view(hidden_shape).transpose(1, 2);
   
   //LOG(INFO) << "Attention Position Emb";
   const torch::Tensor& position_embeddings_cos = std::get<0>(position_embeddings);
@@ -414,8 +448,25 @@ Qwen3MLP::Qwen3MLP(
 
 Qwen3MLP::~Qwen3MLP() {
 }
+
+void Qwen3MLP::prepare_fused_weights() {
+#if USE_NPU
+  if (!_gate_up_weight.defined()) {
+    torch::NoGradGuard no_grad;
+    _gate_up_weight = torch::cat({this->gate_proj->weight, this->up_proj->weight}, /*dim=*/0);
+  }
+#endif
+}
   
 torch::Tensor Qwen3MLP::forward(const torch::Tensor& x) {
+#if USE_NPU
+  if (x.device().is_privateuseone()) {
+    // auto fused = torch::cat({this->gate_proj(x), this->up_proj(x)}, /*dim=*/-1);
+    // return this->down_proj(at_npu::native::custom_ops::npu_swiglu(fused, /*dim=*/-1));
+    auto fused = torch::linear(x, _gate_up_weight);
+    return this->down_proj(at_npu::native::custom_ops::npu_swiglu(fused, /*dim=*/-1));
+  }
+#endif
   SiLUActivation silu;
   return this->down_proj(silu.forward(this->gate_proj(x)) * this->up_proj(x));
 }
@@ -455,6 +506,27 @@ torch::Tensor Qwen3DecoderLayer::forward(
   int start_pos /*= 0*/,
   int layer_idx /*= -1*/
   ) {
+#if USE_NPU
+  auto normed = this->input_layernorm->forward(hidden_states);
+  torch::Tensor attn_out, attn_weights;
+  std::tie(attn_out, attn_weights) = this->self_attn->forward(
+    normed,
+    position_embeddings,
+    attention_mask,
+    start_pos,
+    layer_idx
+    );
+
+  torch::Tensor mlp_in, rstd, residual;
+  std::tie(mlp_in, rstd, residual) =
+    at_npu::native::custom_ops::npu_add_rms_norm(
+      hidden_states,
+      attn_out,
+      this->post_attention_layernorm->get_weight(),
+      this->post_attention_layernorm->get_eps()
+      );
+  return residual + this->mlp->forward(mlp_in);
+#else
   //uint64_t time_start = mycommon::getMilliTime();
   //LOG(INFO) << "Qwen3DecoderLayer::forward layer_norm Input [" << format_tensor(hidden_states) << "]";
   auto hidden_states_new = this->input_layernorm->forward(hidden_states);
@@ -498,6 +570,7 @@ torch::Tensor Qwen3DecoderLayer::forward(
   //LOG(INFO) << "mlp Time[" << time_used << "]";
   hidden_states_new = residual + hidden_states_new;
   return hidden_states_new;
+#endif
 }
 
 // ============ RotaryEmbedding ============
@@ -608,6 +681,14 @@ Qwen3Model::Qwen3Model(
 Qwen3Model::~Qwen3Model() {
 }
 
+void Qwen3Model::prepare_fused_weights() {
+  for (int i = 0; i < this->layers->size(); i++) {
+    Qwen3DecoderLayer *layer = (Qwen3DecoderLayer *)this->layers[i].get();
+    layer->self_attn->prepare_fused_weights();
+    layer->mlp->prepare_fused_weights();
+  }
+}
+
 std::tuple<torch::Tensor, torch::Tensor> Qwen3Model::prepare(
   const std::vector<int64_t>& input_ids,
   int start_pos /*= 0*/
@@ -698,6 +779,10 @@ Qwen3ForCausalLM::Qwen3ForCausalLM(
 }
 
 Qwen3ForCausalLM::~Qwen3ForCausalLM() {
+}
+  
+void Qwen3ForCausalLM::prepare_fused_weights() {
+  return this->model->prepare_fused_weights();
 }
   
 torch::Tensor Qwen3ForCausalLM::forward(
