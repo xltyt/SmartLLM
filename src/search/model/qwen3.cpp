@@ -344,11 +344,21 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
     // auto k_projected = this->k_proj->forward(hidden_states).view(hidden_shape);
     // auto value_states = this->v_proj->forward(hidden_states).view(hidden_shape).transpose(1, 2);
     auto qkv = torch::linear(hidden_states, _qkv_weight);
+#if 1
     const int64_t q_out = this->q_proj->weight.size(0);
     const int64_t k_out = this->k_proj->weight.size(0);
     q_projected = qkv.slice(-1, 0, q_out).contiguous().view(hidden_shape);
     k_projected = qkv.slice(-1, q_out, q_out + k_out).contiguous().view(hidden_shape);
     value_states = qkv.slice(-1, q_out + k_out, qkv.size(-1)).contiguous().view(hidden_shape).transpose(1, 2);
+#else
+    const int64_t num_heads = this->q_proj->weight.size(0) / _head_dim;
+    const int64_t num_kv_heads = this->k_proj->weight.size(0) / _head_dim;
+    // Last-dim stride stays 1, so q/k RMSNorm reads each head without a pack copy.
+    auto qkv_heads = qkv.view({batch_size, seq_len, num_heads + 2 * num_kv_heads, _head_dim});
+    q_projected = qkv_heads.narrow(/*dim=*/2, 0, num_heads);
+    k_projected = qkv_heads.narrow(/*dim=*/2, num_heads, num_kv_heads);
+    value_states = qkv_heads.narrow(/*dim=*/2, num_heads + num_kv_heads, num_kv_heads).transpose(1, 2);
+#endif
   } else
 #endif
   {
