@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.11.09 20:49:41
+ * Last modified: 2026.11.11 10:19:24
  *
 \****************************************************/
 
@@ -722,32 +722,45 @@ TEST_F(Qwen3RunnerCache, Perf) {
     kv_cache->reset();
   }
 
-  sync_device();
-  uint64_t time_start = mycommon::getMilliTime();
-  auto logits = model->forward(
-    ref_input_ids,
-    1,
-    0
-    );
-  sync_device();
-  uint64_t time_prefill = mycommon::getMilliTime() - time_start;
+  constexpr int kPerfRuns = 5;
+  uint64_t time_prefill_sum = 0;
+  uint64_t time_decode_sum = 0;
+  int64_t gen_tokens = 0;
+  for (int run = 0; run < kPerfRuns; ++run) {
+    sync_device();
+    uint64_t time_start = mycommon::getMilliTime();
+    auto logits = model->forward(
+      ref_input_ids,
+      1,
+      0
+      );
+    sync_device();
+    const uint64_t time_prefill = mycommon::getMilliTime() - time_start;
 
-  std::vector<int64_t> greedy_tokens = ref_input_ids;
-  time_start = mycommon::getMilliTime();
-  for (int64_t step = 0; step < gen_len; ++step) {
-    const int64_t next_token = greedy_token_id(logits);
-    greedy_tokens.push_back(next_token);
-    if (step + 1 >= gen_len) {
-      break;
+    std::vector<int64_t> greedy_tokens = ref_input_ids;
+    time_start = mycommon::getMilliTime();
+    for (int64_t step = 0; step < gen_len; ++step) {
+      const int64_t next_token = greedy_token_id(logits);
+      greedy_tokens.push_back(next_token);
+      if (step + 1 >= gen_len) {
+        break;
+      }
+      logits = model->forward({next_token}, /*logits_to_keep=*/1, prompt_len + step);
     }
-    logits = model->forward({next_token}, /*logits_to_keep=*/1, prompt_len + step);
+    sync_device();
+    const uint64_t time_decode = mycommon::getMilliTime() - time_start;
+    gen_tokens = static_cast<int64_t>(greedy_tokens.size()) - prompt_len;
+    time_prefill_sum += time_prefill;
+    time_decode_sum += time_decode;
+    kv_cache->reset();
   }
-  sync_device();
-  uint64_t time_decode = mycommon::getMilliTime() - time_start;
-  const int64_t gen_tokens = static_cast<int64_t>(greedy_tokens.size()) - prompt_len;
-  LOG(INFO) << "TTFT[" << time_prefill << "] "
+
+  const float time_prefill = static_cast<float>(time_prefill_sum) / kPerfRuns;
+  const float time_decode = static_cast<float>(time_decode_sum) / kPerfRuns;
+  LOG(INFO) << "Runs[" << kPerfRuns << "] "
+            << "TTFT[" << time_prefill << "] "
             << "Decode Time[" << time_decode << "] "
-            << "TPOT[" << ((float)time_decode / std::max(gen_tokens, static_cast<int64_t>(1))) << "] "
+            << "TPOT[" << (time_decode / std::max(gen_tokens, static_cast<int64_t>(1))) << "] "
             << "PrefillPerf[" << ((float)prompt_len * 1000 / time_prefill) << "] "
             << "OutPerf[" << ((float)gen_tokens * 1000 / time_decode) << "] "
             << "Input[" << prompt_len << "] "

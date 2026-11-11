@@ -499,15 +499,15 @@ Qwen3DecoderLayer::Qwen3DecoderLayer(
 Qwen3DecoderLayer::~Qwen3DecoderLayer() {
 }
 
-torch::Tensor Qwen3DecoderLayer::forward(
-  const torch::Tensor& hidden_states,
+#if USE_NPU
+std::pair<torch::Tensor, torch::Tensor> Qwen3DecoderLayer::forward_split(
+  const torch::Tensor& residual,
+  const torch::Tensor& normed,
   const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
   const std::optional<torch::Tensor>& attention_mask,
   int start_pos /*= 0*/,
   int layer_idx /*= -1*/
   ) {
-#if USE_NPU
-  auto normed = this->input_layernorm->forward(hidden_states);
   torch::Tensor attn_out, attn_weights;
   std::tie(attn_out, attn_weights) = this->self_attn->forward(
     normed,
@@ -517,15 +517,36 @@ torch::Tensor Qwen3DecoderLayer::forward(
     layer_idx
     );
 
-  torch::Tensor mlp_in, rstd, residual;
-  std::tie(mlp_in, rstd, residual) =
+  torch::Tensor mlp_in, rstd, attn_residual;
+  std::tie(mlp_in, rstd, attn_residual) =
     at_npu::native::custom_ops::npu_add_rms_norm(
-      hidden_states,
+      residual,
       attn_out,
       this->post_attention_layernorm->get_weight(),
       this->post_attention_layernorm->get_eps()
       );
-  return residual + this->mlp->forward(mlp_in);
+  return {this->mlp->forward(mlp_in), attn_residual};
+}
+#endif
+
+torch::Tensor Qwen3DecoderLayer::forward(
+  const torch::Tensor& hidden_states,
+  const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
+  const std::optional<torch::Tensor>& attention_mask,
+  int start_pos /*= 0*/,
+  int layer_idx /*= -1*/
+  ) {
+#if USE_NPU
+  auto normed = this->input_layernorm->forward(hidden_states);
+  auto [mlp_out, attn_residual] = this->forward_split(
+    hidden_states,
+    normed,
+    position_embeddings,
+    attention_mask,
+    start_pos,
+    layer_idx
+    );
+  return attn_residual + mlp_out;
 #else
   //uint64_t time_start = mycommon::getMilliTime();
   //LOG(INFO) << "Qwen3DecoderLayer::forward layer_norm Input [" << format_tensor(hidden_states) << "]";
@@ -730,6 +751,39 @@ torch::Tensor Qwen3Model::forward(
   std::optional<torch::Tensor> attention_mask = is_decode ? std::nullopt : std::make_optional(make_causal_mask(input_ids.size(), hidden_states.scalar_type(), hidden_states.device()));
   
   //time_start = mycommon::getMilliTime();
+#if USE_NPU
+  const int num_layers = this->layers->size();
+  auto *first = (Qwen3DecoderLayer *)this->layers[0].get();
+  torch::Tensor normed = first->input_layernorm->forward(hidden_states);
+  for (int i = 0; i < num_layers; i++) {
+    Qwen3DecoderLayer *layer = (Qwen3DecoderLayer *)this->layers[i].get();
+    torch::Tensor mlp_out, attn_residual;
+    std::tie(mlp_out, attn_residual) = layer->forward_split(
+      hidden_states,
+      normed,
+      position_embeddings,
+      attention_mask,
+      start_pos,
+      i
+      );
+    RMSNorm *next_norm = this->norm.get();
+    if (i + 1 < num_layers) {
+      Qwen3DecoderLayer *next = (Qwen3DecoderLayer *)this->layers[i + 1].get();
+      next_norm = next->input_layernorm.get();
+    }
+    torch::Tensor rstd;
+    std::tie(normed, rstd, hidden_states) =
+      at_npu::native::custom_ops::npu_add_rms_norm(
+        attn_residual,
+        mlp_out,
+        next_norm->get_weight(),
+        next_norm->get_eps()
+        );
+  }
+  // normed is RMSNorm(attn_residual + mlp_out). The last call uses the final norm,
+  // so this is the tensor lm_head consumes.
+  return normed;
+#else
   for (int i = 0; i < this->layers->size(); i++) {
     Qwen3DecoderLayer *layer = (Qwen3DecoderLayer *)this->layers[i].get();
     hidden_states = layer->forward(
@@ -745,6 +799,7 @@ torch::Tensor Qwen3Model::forward(
   hidden_states = this->norm->forward(hidden_states);
   
   return hidden_states;
+#endif
 }
 
 // ============ Top-level Model ============

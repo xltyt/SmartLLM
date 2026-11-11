@@ -96,6 +96,19 @@ public:
     int start_pos = 0,
     int layer_idx = -1
     );
+#if USE_NPU
+  // normed is the attention input. residual is the pre-norm stream.
+  // Returns {mlp_out, attn_residual}. The caller fuses attn_residual + mlp_out
+  // with the next RMSNorm.
+  std::pair<torch::Tensor, torch::Tensor> forward_split(
+    const torch::Tensor& residual,
+    const torch::Tensor& normed,
+    const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
+    const std::optional<torch::Tensor>& attention_mask,
+    int start_pos = 0,
+    int layer_idx = -1
+    );
+#endif
 
 public:
   std::shared_ptr<RMSNorm> input_layernorm{nullptr};
