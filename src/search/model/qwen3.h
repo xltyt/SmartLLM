@@ -151,7 +151,12 @@ public:
     const torch::Tensor& position_ids
     );
 
+  // Rebuild FP32 frequencies after moving the model or changing its dtype.
+  void prepare_device(torch::Device device);
+
 private:
+  int64_t _head_dim;
+  double _rope_theta;
   double _attention_scaling{1.0};
   torch::Tensor _inv_freq;
   torch::Tensor _original_inv_freq;

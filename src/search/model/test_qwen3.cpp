@@ -855,9 +855,19 @@ TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
     else parameter.value().normal_(0, .05);
   }
   model.eval();
+  auto original_frequency = model.named_buffers()["model.rotary_emb.inv_freq"].clone();
   model.to(device);
   model.to(torch::kBFloat16);
   model.prepare_fused_weights();
+  auto frequency = model.named_buffers()["model.rotary_emb.inv_freq"];
+  EXPECT_EQ(frequency.device(), device);
+  EXPECT_EQ(frequency.scalar_type(), torch::kFloat32);
+  EXPECT_TRUE(torch::allclose(frequency.cpu(), original_frequency, 1e-6, 1e-8));
+  auto original_buffer = model.named_buffers()["model.rotary_emb.original_inv_freq"];
+  EXPECT_EQ(original_buffer.device(), device);
+  EXPECT_EQ(original_buffer.scalar_type(), torch::kFloat32);
+  EXPECT_TRUE(torch::equal(original_buffer, frequency));
+  const void* frequency_address = frequency.data_ptr();
   const std::vector<int64_t> prompt{1, 4, 9};
   std::vector<torch::Tensor> expected;
   (void)model.forward(prompt);
@@ -880,6 +890,7 @@ TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
       << "position " << pos
       << ", max_abs_error " << (actual_fp32 - expected_fp32).abs().max().item<float>();
   }
+  EXPECT_EQ(frequency_address, model.named_buffers()["model.rotary_emb.inv_freq"].data_ptr());
 }
 
 #endif

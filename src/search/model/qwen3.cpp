@@ -629,6 +629,8 @@ Qwen3RotaryEmbedding::Qwen3RotaryEmbedding(
   double rope_theta /*= 1000000.0*/,
   torch::Device device /*= torch::kCPU*/
   ) {
+  _head_dim = head_dim;
+  _rope_theta = rope_theta;
   auto [computed_inv_freq, factor] = compute_default_rope_parameters(head_dim, rope_theta, device);
   _attention_scaling = factor;
 
@@ -641,11 +643,20 @@ std::tuple<torch::Tensor, double> Qwen3RotaryEmbedding::compute_default_rope_par
   double rope_theta,
   torch::Device device) {
   
-  auto arange_tensor = torch::arange(0, head_dim, 2, torch::dtype(torch::kInt64));
+  auto arange_tensor = torch::arange(0, head_dim, 2, torch::TensorOptions().dtype(torch::kInt64).device(device));
   auto exponent = arange_tensor.to(torch::kFloat32) / static_cast<double>(head_dim);
   auto inv_freq = 1.0 / torch::pow(rope_theta, exponent);
   double attention_factor = 1.0;
   return std::make_tuple(inv_freq, attention_factor);
+}
+
+void Qwen3RotaryEmbedding::prepare_device(torch::Device device) {
+  if (_inv_freq.device() != device || _inv_freq.scalar_type() != torch::kFloat32) {
+    torch::NoGradGuard no_grad;
+    auto values = compute_default_rope_parameters(_head_dim, _rope_theta, device);
+    _inv_freq.set_data(std::get<0>(values));
+    _original_inv_freq.set_data(std::get<0>(values).clone());
+  }
 }
 
 std::pair<torch::Tensor, torch::Tensor> Qwen3RotaryEmbedding::forward(
@@ -654,12 +665,12 @@ std::pair<torch::Tensor, torch::Tensor> Qwen3RotaryEmbedding::forward(
   ) {
   torch::NoGradGuard no_grad;
 
+  TORCH_CHECK(_inv_freq.device() == x.device() && _inv_freq.scalar_type() == torch::kFloat32,
+              "RoPE frequencies must be FP32 on the input device; call prepare_device() before forward");
   int64_t batch_size = position_ids.size(0);
   auto inv_freq_expanded = _inv_freq
     .unsqueeze(0).unsqueeze(-1)
-    .to(torch::kFloat32)
-    .expand({batch_size, -1, 1})
-    .to(x.device());
+    .expand({batch_size, -1, 1});
 
   auto position_ids_expanded = position_ids.unsqueeze(1).to(torch::kFloat32);
 
@@ -726,13 +737,14 @@ Qwen3Model::Qwen3Model(
 
   this->norm = register_module("norm", std::make_shared<RMSNorm>(hidden_size, rms_norm_eps));
     
-  this->rotary_emb = std::make_shared<Qwen3RotaryEmbedding>(head_dim, 1000000.0, tensor_options.device());
+  this->rotary_emb = register_module("rotary_emb", std::make_shared<Qwen3RotaryEmbedding>(head_dim, 1000000.0, tensor_options.device()));
 }
 
 Qwen3Model::~Qwen3Model() {
 }
 
 void Qwen3Model::prepare_fused_weights() {
+  this->rotary_emb->prepare_device(this->embed_tokens->weight.device());
   for (int i = 0; i < this->layers->size(); i++) {
     Qwen3DecoderLayer *layer = (Qwen3DecoderLayer *)this->layers[i].get();
     layer->self_attn->prepare_fused_weights();
