@@ -37,7 +37,8 @@ public:
     const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
     const std::optional<torch::Tensor>& attention_mask,
     int start_pos = 0,
-    int layer_idx = -1
+    int layer_idx = -1,
+    const DecodeContext* decode_context = nullptr
     );
   
 private:  
@@ -94,7 +95,8 @@ public:
     const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
     const std::optional<torch::Tensor>& attention_mask,
     int start_pos = 0,
-    int layer_idx = -1
+    int layer_idx = -1,
+    const DecodeContext* decode_context = nullptr
     );
 #if USE_NPU
   // normed is the attention input. residual is the pre-norm stream.
@@ -106,7 +108,8 @@ public:
     const std::tuple<torch::Tensor, torch::Tensor>& position_embeddings,
     const std::optional<torch::Tensor>& attention_mask,
     int start_pos = 0,
-    int layer_idx = -1
+    int layer_idx = -1,
+    const DecodeContext* decode_context = nullptr
     );
 #endif
 
@@ -182,6 +185,21 @@ public:
     int start_pos = 0
     );
 
+  // Static KV decode entry: ids [1,1], positions [1], both int64 on device.
+  // This does not capture/replay a graph; other capture preparation is separate.
+  // Position values must be in [0, context_len); no host value reads occur.
+  torch::Tensor forward_static_decode(
+    const torch::Tensor& input_ids,
+    const DecodeContext& context);
+
+private:
+  torch::Tensor forward_hidden(
+    torch::Tensor hidden_states,
+    const torch::Tensor& position_ids,
+    int start_pos,
+    const DecodeContext* decode_context);
+  KVCache* _kv_cache = nullptr;
+
 public:
   torch::nn::Embedding embed_tokens{nullptr};
   torch::nn::ModuleList layers{nullptr};
@@ -207,6 +225,10 @@ public:
 
 public:
   void prepare_fused_weights();
+  // Return logits using device-position KV writes and a fixed-length masked view.
+  torch::Tensor forward_static_decode(
+    const torch::Tensor& input_ids,
+    const DecodeContext& context);
   torch::Tensor forward(
     const std::vector<int64_t>& input_ids,
     int logits_to_keep = 1,

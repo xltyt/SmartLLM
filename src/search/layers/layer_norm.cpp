@@ -1,7 +1,7 @@
 /****************************************************\
  *
  * Copyright (C) 2019 All Rights Reserved
- * Last modified: 2026.10.22 15:34:50
+ * Last modified: 2026.11.18 17:25:20
  *
 \****************************************************/
 
@@ -20,19 +20,20 @@ RMSNorm::~RMSNorm() {
 
 torch::Tensor RMSNorm::forward(torch::Tensor x) {
 #if USE_NPU
-  if (x.device().is_privateuseone()) {
+  {
     return std::get<0>(at_npu::native::custom_ops::npu_rms_norm(
       x,
       _weight,
       _eps
       ));
   }
-#endif
+#else
 	auto input_dtype = x.dtype();
 	auto x_f32 = x.to(torch::kFloat32);
 	auto variance = x_f32.pow(2).mean(-1, true);
   auto x_normed = x_f32 * torch::rsqrt(variance + _eps);
   return _weight * x_normed.to(input_dtype);
+#endif
 }
 
 #if 0

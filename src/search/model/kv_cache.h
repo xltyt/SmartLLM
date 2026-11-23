@@ -11,6 +11,12 @@
 #define C10_USE_GLOG
 #include <torch/torch.h>
 
+// Host metadata is fixed during capture; position values stay on the device.
+struct DecodeContext {
+  torch::Tensor positions;
+  int64_t context_len;
+};
+
 class KVCache {
 public:
   KVCache(
@@ -37,6 +43,20 @@ public:
 
   // Reset Cache For Next Request
   void reset();
+
+  int64_t capacity() const { return _max_seq_len; }
+  int64_t batch_size() const { return _k_cache.front().size(0); }
+
+  // Single-token decode with a fixed-size read view. Keep context_len fixed
+  // across replays and update the contents of the same device position tensor.
+  // The caller validates 0 <= position < context_len before capture/replay;
+  // do not read the position value back to the host here.
+  std::pair<torch::Tensor, torch::Tensor> update_static(
+    int layer_idx,
+    const torch::Tensor& k_states,
+    const torch::Tensor& v_states,
+    const DecodeContext& context);
+
   
 private:
   int _num_layers = 0;

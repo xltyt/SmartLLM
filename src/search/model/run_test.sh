@@ -72,6 +72,8 @@ for MODEL_NAME in "${MODEL_NAMES[@]}"; do
   which npu-smi &> /dev/null
   if [ $? -eq 0 ]; then
     MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch_npu/lib/:${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_npu_9.0.0 --gtest_filter=Qwen3RunnerCache.*
+    
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch_npu/lib/:${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_npu_9.0.0 --gtest_filter=Qwen3StaticDecode.*
   fi
   cd ..
 done

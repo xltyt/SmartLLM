@@ -575,6 +575,11 @@ TEST_F(Qwen3RunnerCache, Correctness) {
     static_cast<int64_t>(max_new_tokens),
     static_cast<int64_t>(ref_output_ids.size()) - prompt_len);
   ASSERT_EQ(gen_len, ref_logits.size(0));
+  ASSERT_GT(gen_len, 0);
+  ASSERT_LE(prompt_len + gen_len - 1, kv_cache->capacity());
+  auto decode_token = torch::zeros({1, 1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  auto decode_position = torch::zeros({1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  DecodeContext decode_context{decode_position, kv_cache->capacity()};
 
   std::vector<int64_t> greedy_tokens = ref_input_ids;
   float max_abs_err = 0.0f;
@@ -662,7 +667,13 @@ TEST_F(Qwen3RunnerCache, Correctness) {
       LOG(INFO) << "EOS End at teacher-force step[" << step - 1 << "]";
       break;
     }
+#if 0
     logits = model->forward({feed}, /*logits_to_keep=*/1, prompt_len + step - 1);
+#else
+    decode_token.fill_(feed);
+    decode_position.fill_(prompt_len + step - 1);
+    logits = model->forward_static_decode(decode_token, decode_context);
+#endif
     eval_step(step, logits);
     feed = ref_output_ids[prompt_len + step];
   }
@@ -713,11 +724,22 @@ TEST_F(Qwen3RunnerCache, Perf) {
     static_cast<int64_t>(max_new_tokens),
     static_cast<int64_t>(ref_output_ids.size()) - prompt_len);
   ASSERT_GT(gen_len, 0);
+  ASSERT_LT(prompt_len, kv_cache->capacity());
+  ASSERT_LE(prompt_len + gen_len - 1, kv_cache->capacity());
+  auto decode_token = torch::zeros({1, 1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  auto decode_position = torch::zeros({1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  DecodeContext decode_context{decode_position, kv_cache->capacity()};
 
   {
     auto warmup_logits = model->forward(ref_input_ids, 1, 0);
     const int64_t warmup_token = greedy_token_id(warmup_logits);
+#if 0
     (void)model->forward({warmup_token}, 1, prompt_len);
+#else
+    decode_token.fill_(warmup_token);
+    decode_position.fill_(prompt_len);
+    (void)model->forward_static_decode(decode_token, decode_context);
+#endif
     sync_device();
     kv_cache->reset();
   }
@@ -745,7 +767,13 @@ TEST_F(Qwen3RunnerCache, Perf) {
       if (step + 1 >= gen_len) {
         break;
       }
+#if 0
       logits = model->forward({next_token}, /*logits_to_keep=*/1, prompt_len + step);
+#else
+      decode_token.fill_(next_token);
+      decode_position.fill_(prompt_len + step);
+      logits = model->forward_static_decode(decode_token, decode_context);
+#endif
     }
     sync_device();
     const uint64_t time_decode = mycommon::getMilliTime() - time_start;
@@ -766,6 +794,95 @@ TEST_F(Qwen3RunnerCache, Perf) {
             << "Input[" << prompt_len << "] "
             << "Output[" << gen_tokens << "]";
 }
+
+#if USE_NPU
+class Qwen3StaticDecode : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    const char *device_name = getenv("NPU_TEST_DEVICE");
+    if (device_name == nullptr) {
+      device_name = "npu:0";
+    }
+    torch_npu::init_npu(device_name);
+    device = torch::Device(device_name);
+  }
+
+  static void TearDownTestSuite() {
+    torch::npu::synchronize();
+    torch_npu::finalize_npu();
+  }
+
+  static torch::Device device;
+};
+
+torch::Device Qwen3StaticDecode::device = torch::Device(torch::kCPU);
+
+TEST_F(Qwen3StaticDecode, DevicePositionUpdatesTheRequestedSlot) {
+  torch::NoGradGuard no_grad;
+  KVCache cache(1, 1, 2, 8, 16, torch::kBFloat16, device);
+  auto position = torch::full({1}, 2, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  DecodeContext context{position, 8};
+  auto key = torch::full({1, 2, 1, 8}, 3.0f, torch::TensorOptions().dtype(torch::kBFloat16).device(device));
+  auto value = key + 1;
+  auto first = cache.update_static(0, key, value, context);
+  const void* key_address = first.first.data_ptr();
+  const void* value_address = first.second.data_ptr();
+  position.fill_(5);
+  auto second = cache.update_static(0, key + 4, value + 4, context);
+  EXPECT_EQ(key_address, second.first.data_ptr());
+  EXPECT_EQ(value_address, second.second.data_ptr());
+  EXPECT_TRUE(torch::equal(second.first.select(2, 2), key.squeeze(2)));
+  EXPECT_TRUE(torch::equal(second.first.select(2, 5), (key + 4).squeeze(2)));
+  EXPECT_TRUE(torch::equal(second.second.select(2, 2), value.squeeze(2)));
+  EXPECT_TRUE(torch::equal(second.second.select(2, 5), (value + 4).squeeze(2)));
+  EXPECT_EQ(second.first.size(2), 8);
+  EXPECT_EQ(second.second.size(2), 8);
+  KVCache eager_cache(1, 1, 2, 8, 16, torch::kBFloat16, device);
+  (void)eager_cache.update(0, key, value, 2);
+  auto expected = eager_cache.update(0, key + 4, value + 4, 5);
+  EXPECT_TRUE(torch::equal(second.first.narrow(2, 0, 6), expected.first));
+  EXPECT_TRUE(torch::equal(second.second.narrow(2, 0, 6), expected.second));
+  EXPECT_THROW(cache.update_static(0, key, value, DecodeContext{position, 17}), c10::Error);
+}
+
+TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
+  torch::NoGradGuard no_grad;
+  torch::manual_seed(177);
+  KVCache cache(2, 1, 2, 16, 32, torch::kBFloat16, device);
+  Qwen3ForCausalLM model(64, 32, 2, 4, 2, 16, 64, 1e-6f, &cache);
+  for (auto& parameter : model.named_parameters()) {
+    if (parameter.key().find("norm") != std::string::npos) parameter.value().fill_(1);
+    else parameter.value().normal_(0, .05);
+  }
+  model.eval();
+  model.to(device);
+  model.to(torch::kBFloat16);
+  model.prepare_fused_weights();
+  const std::vector<int64_t> prompt{1, 4, 9};
+  std::vector<torch::Tensor> expected;
+  (void)model.forward(prompt);
+  for (int pos = 3; pos < 20; ++pos) {
+    expected.push_back(model.forward({(pos * 7) % 64}, 1, pos).clone());
+  }
+  // Preserve the old, nonzero suffix, then overwrite only the new prefix.
+  (void)model.forward(prompt);
+  auto token = torch::zeros({1,1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  auto position = torch::zeros({1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  DecodeContext context{position, 32};
+  for (int pos = 3; pos < 20; ++pos) {
+    token.fill_((pos * 7) % 64);
+    position.fill_(pos);
+    auto actual = model.forward_static_decode(token, context);
+    // BF16 attention kernels can round differently for different KV lengths.
+    auto actual_fp32 = actual.to(torch::kFloat32);
+    auto expected_fp32 = expected[pos - 3].to(torch::kFloat32);
+    EXPECT_TRUE(torch::allclose(actual_fp32, expected_fp32, 1e-2, 1e-3))
+      << "position " << pos
+      << ", max_abs_error " << (actual_fp32 - expected_fp32).abs().max().item<float>();
+  }
+}
+
+#endif
 
 int main(int argc, char *argv[]) {
   testing::InitGoogleTest(&argc, argv);

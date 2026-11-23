@@ -30,7 +30,7 @@ std::pair<torch::Tensor, torch::Tensor> KVCache::update(
   const torch::Tensor& k_states,
   const torch::Tensor& v_states,
   int64_t start_pos
-) {
+  ) {
   torch::NoGradGuard no_grad;
   // [batch, num_kv_heads, seq_len, head_dim]
   int64_t seq_len = k_states.size(2);
@@ -68,6 +68,37 @@ std::pair<torch::Tensor, torch::Tensor> KVCache::update(
 
   return {valid_k, valid_v};
 
+}
+
+std::pair<torch::Tensor, torch::Tensor> KVCache::update_static(
+  int layer_idx,
+  const torch::Tensor& k_states,
+  const torch::Tensor& v_states,
+  const DecodeContext& context
+  ) {
+  torch::NoGradGuard no_grad;
+  TORCH_CHECK(layer_idx >= 0 && layer_idx < _num_layers, "Invalid KV layer index");
+  TORCH_CHECK(context.context_len > 0 && context.context_len <= _max_seq_len,
+              "Invalid static KV context length");
+  const auto& cache = _k_cache[layer_idx];
+  const auto& positions = context.positions;
+  TORCH_CHECK(positions.defined() && positions.dim() == 1 && positions.numel() == 1 &&
+              positions.scalar_type() == torch::kInt64 && positions.device() == cache.device(),
+              "Static KV position must be one int64 value on the cache device");
+  TORCH_CHECK(k_states.dim() == 4 && k_states.sizes() == v_states.sizes() &&
+              k_states.size(0) == cache.size(0) && k_states.size(1) == cache.size(1) &&
+              k_states.size(2) == 1 && k_states.size(3) == cache.size(3) &&
+              k_states.device() == cache.device() && v_states.device() == cache.device() &&
+              k_states.scalar_type() == cache.scalar_type() && v_states.scalar_type() == cache.scalar_type(),
+              "Static KV update requires matching single-token K/V tensors");
+  // Some TorchNPU index_copy_ paths use index.item(), which breaks capture.
+  // Tensor scatter consumes indices on device. There is exactly one write per
+  // (batch, head, channel), so this does not introduce duplicate-index races.
+  auto indices = positions.view({1,1,1,1}).expand(k_states.sizes()).contiguous();
+  _k_cache[layer_idx].scatter_(2, indices, k_states);
+  _v_cache[layer_idx].scatter_(2, indices, v_states);
+  return {_k_cache[layer_idx].narrow(2, 0, context.context_len),
+          _v_cache[layer_idx].narrow(2, 0, context.context_len)};
 }
 
 void KVCache::reset() {
