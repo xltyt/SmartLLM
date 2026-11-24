@@ -6,6 +6,9 @@
 \****************************************************/
 
 #include <gtest/gtest.h>
+#include <gflags/gflags.h>
+#include <cstdlib>
+#include <cstdio>
 #define C10_USE_GLOG
 #include <torch/torch.h>
 #include <torch/script.h>
@@ -22,12 +25,31 @@
 #include <timer.h>
 #include "utils/model_utils.h"
 #include "model/qwen3.h"
+#include "model/qwen3_graph.h"
 #include "token/qwen_token.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
 
+DEFINE_bool(decode_graph, false, "Use NPU graph for single-token decode; prefill remains eager");
+
 namespace {
+
+#if USE_NPU
+// TorchNPU caches runtime/stream state. Do not finalize it between suites or
+// gtest repetitions: subsequent init_npu() does not recreate a usable context.
+bool npu_initialized = false;
+
+torch::Device prepare_test_npu() {
+  const char* name = getenv("NPU_TEST_DEVICE");
+  const torch::Device device(name ? name : "npu:0");
+  if (!npu_initialized) {
+    torch_npu::init_npu(device);
+    npu_initialized = true;
+  }
+  return device;
+}
+#endif
 
 constexpr int kRefMantissaBits = 7;
 constexpr float kAllowGapUlp = 4.0f;
@@ -440,8 +462,7 @@ class Qwen3RunnerCache : public ::testing::Test {
 
 #if USE_NPU
     LOG(INFO) << "Init NPU...";
-    torch_npu::init_npu("npu:0");
-    device = at::Device("npu:0");
+    device = prepare_test_npu();
     LOG(INFO) << "Init NPU Finished";
 #elif USE_GPU
     device = torch::Device(torch::kCUDA);
@@ -514,10 +535,10 @@ class Qwen3RunnerCache : public ::testing::Test {
 #elif USE_NPU
     model->to(device);
     model->to(torch::kBFloat16);
-    model->prepare_fused_weights();
 #else
     model->to(torch::kHalf);
 #endif
+    model->prepare_fused_weights();
     LOG(INFO) << "Model Loaded";
   }
 
@@ -526,9 +547,6 @@ class Qwen3RunnerCache : public ::testing::Test {
     model = nullptr;
     delete kv_cache;
     kv_cache = nullptr;
-#if USE_NPU
-    torch_npu::finalize_npu();
-#endif
   }
 
   void SetUp() override {
@@ -580,6 +598,16 @@ TEST_F(Qwen3RunnerCache, Correctness) {
   auto decode_token = torch::zeros({1, 1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
   auto decode_position = torch::zeros({1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
   DecodeContext decode_context{decode_position, kv_cache->capacity()};
+  std::unique_ptr<Qwen3DecodeGraph> decode_graph;
+  if (FLAGS_decode_graph) {
+    decode_graph = std::make_unique<Qwen3DecodeGraph>(*model, *kv_cache, kv_cache->capacity());
+  }
+  auto decode = [&](int64_t token, int64_t position) {
+    if (decode_graph) return decode_graph->forward(token, position);
+    decode_token.fill_(token);
+    decode_position.fill_(position);
+    return model->forward_static_decode(decode_token, decode_context);
+  };
 
   std::vector<int64_t> greedy_tokens = ref_input_ids;
   float max_abs_err = 0.0f;
@@ -670,14 +698,16 @@ TEST_F(Qwen3RunnerCache, Correctness) {
 #if 0
     logits = model->forward({feed}, /*logits_to_keep=*/1, prompt_len + step - 1);
 #else
-    decode_token.fill_(feed);
-    decode_position.fill_(prompt_len + step - 1);
-    logits = model->forward_static_decode(decode_token, decode_context);
+    logits = decode(feed, prompt_len + step - 1);
 #endif
     eval_step(step, logits);
     feed = ref_output_ids[prompt_len + step];
   }
   const int eval_steps = match_count + allowed_mismatch + hard_mismatch;
+  if (decode_graph) {
+    EXPECT_EQ(decode_graph->capture_count(), eval_steps > 1 ? 1 : 0);
+    EXPECT_EQ(decode_graph->replay_count(), std::max(eval_steps - 1, 0));
+  }
   const float mean_abs_err = mean_abs_sum / std::max(eval_steps, 1);
   LOG(INFO) << "Eval match[" << match_count
             << "] allowed_mismatch[" << allowed_mismatch
@@ -729,6 +759,16 @@ TEST_F(Qwen3RunnerCache, Perf) {
   auto decode_token = torch::zeros({1, 1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
   auto decode_position = torch::zeros({1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
   DecodeContext decode_context{decode_position, kv_cache->capacity()};
+  std::unique_ptr<Qwen3DecodeGraph> decode_graph;
+  if (FLAGS_decode_graph) {
+    decode_graph = std::make_unique<Qwen3DecodeGraph>(*model, *kv_cache, kv_cache->capacity());
+  }
+  auto decode = [&](int64_t token, int64_t position) {
+    if (decode_graph) return decode_graph->forward(token, position);
+    decode_token.fill_(token);
+    decode_position.fill_(position);
+    return model->forward_static_decode(decode_token, decode_context);
+  };
 
   {
     auto warmup_logits = model->forward(ref_input_ids, 1, 0);
@@ -736,9 +776,7 @@ TEST_F(Qwen3RunnerCache, Perf) {
 #if 0
     (void)model->forward({warmup_token}, 1, prompt_len);
 #else
-    decode_token.fill_(warmup_token);
-    decode_position.fill_(prompt_len);
-    (void)model->forward_static_decode(decode_token, decode_context);
+    (void)decode(warmup_token, prompt_len);
 #endif
     sync_device();
     kv_cache->reset();
@@ -770,9 +808,7 @@ TEST_F(Qwen3RunnerCache, Perf) {
 #if 0
       logits = model->forward({next_token}, /*logits_to_keep=*/1, prompt_len + step);
 #else
-      decode_token.fill_(next_token);
-      decode_position.fill_(prompt_len + step);
-      logits = model->forward_static_decode(decode_token, decode_context);
+      logits = decode(next_token, prompt_len + step);
 #endif
     }
     sync_device();
@@ -783,9 +819,16 @@ TEST_F(Qwen3RunnerCache, Perf) {
     kv_cache->reset();
   }
 
+  if (decode_graph) {
+    EXPECT_EQ(decode_graph->capture_count(), 1);
+    EXPECT_EQ(decode_graph->replay_count(), 1 + kPerfRuns * (gen_len - 1));
+    LOG(INFO) << "Graph captures[" << decode_graph->capture_count()
+              << "] replays[" << decode_graph->replay_count() << "]";
+  }
   const float time_prefill = static_cast<float>(time_prefill_sum) / kPerfRuns;
   const float time_decode = static_cast<float>(time_decode_sum) / kPerfRuns;
-  LOG(INFO) << "Runs[" << kPerfRuns << "] "
+  LOG(INFO) << "DecodeGraph[" << (decode_graph ? "on" : "off") << "] "
+            << "Runs[" << kPerfRuns << "] "
             << "TTFT[" << time_prefill << "] "
             << "Decode Time[" << time_decode << "] "
             << "TPOT[" << (time_decode / std::max(gen_tokens, static_cast<int64_t>(1))) << "] "
@@ -795,21 +838,19 @@ TEST_F(Qwen3RunnerCache, Perf) {
             << "Output[" << gen_tokens << "]";
 }
 
-#if USE_NPU
+#if !USE_GPU
 class Qwen3StaticDecode : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
-    const char *device_name = getenv("NPU_TEST_DEVICE");
-    if (device_name == nullptr) {
-      device_name = "npu:0";
-    }
-    torch_npu::init_npu(device_name);
-    device = torch::Device(device_name);
+#if USE_NPU
+    device = prepare_test_npu();
+#endif
   }
 
   static void TearDownTestSuite() {
+#if USE_NPU
     torch::npu::synchronize();
-    torch_npu::finalize_npu();
+#endif
   }
 
   static torch::Device device;
@@ -890,6 +931,35 @@ TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
       << "position " << pos
       << ", max_abs_error " << (actual_fp32 - expected_fp32).abs().max().item<float>();
   }
+#if USE_NPU
+  if (FLAGS_decode_graph) {
+    Qwen3DecodeGraph graph(model, cache, 32);
+    EXPECT_THROW(graph.forward(1, -1), c10::Error);
+    EXPECT_THROW(graph.forward(1, 32), c10::Error);
+    EXPECT_THROW(graph.forward(64, 3), c10::Error);
+    std::vector<torch::Tensor> retained;
+    for (int run = 0; run < 2; ++run) {
+      if (run == 1) cache.reset();
+      (void)model.forward(prompt);
+      for (int pos = 3; pos < 20; ++pos) {
+        auto actual = graph.forward((pos * 7) % 64, pos);
+        EXPECT_TRUE(torch::allclose(actual.to(torch::kFloat32),
+                                  expected[pos - 3].to(torch::kFloat32), 1e-2, 1e-3))
+          << "graph run " << run << ", position " << pos;
+        if (run == 0) retained.push_back(actual);
+      }
+    }
+    for (size_t i = 0; i < retained.size(); ++i) {
+      EXPECT_TRUE(torch::allclose(retained[i].to(torch::kFloat32),
+                                expected[i].to(torch::kFloat32), 1e-2, 1e-3));
+    }
+    EXPECT_EQ(graph.capture_count(), 1);
+    EXPECT_EQ(graph.replay_count(), 34);
+  }
+#else
+  EXPECT_FALSE(Qwen3DecodeGraph::supported());
+  EXPECT_THROW(Qwen3DecodeGraph(model, cache, 32), c10::Error);
+#endif
   EXPECT_EQ(frequency_address, model.named_buffers()["model.rotary_emb.inv_freq"].data_ptr());
 }
 
@@ -897,7 +967,38 @@ TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
 
 int main(int argc, char *argv[]) {
   testing::InitGoogleTest(&argc, argv);
-  return RUN_ALL_TESTS();
+  gflags::ParseCommandLineFlags(&argc, &argv, true);
+  if (argc > 1) {
+    std::fprintf(stderr, "Unexpected positional argument: %s\n", argv[1]);
+    return 2;
+  }
+  if (FLAGS_decode_graph) {
+    if (!Qwen3DecodeGraph::supported()) {
+      std::fprintf(stderr, "--decode_graph=true requires an NPU build\n");
+      return 2;
+    }
+    // TorchNPU capture requires queue mode. Configure it before NPU startup;
+    // only the explicit command-line flag selects the graph execution path.
+    if (setenv("TASK_QUEUE_ENABLE", "1", 1) != 0) {
+      std::perror("Cannot configure TASK_QUEUE_ENABLE for NPU graph");
+      return 2;
+    }
+  }
+  std::fprintf(stderr, "Qwen3 mode: prefill=eager, decode=%s\n",
+               FLAGS_decode_graph ? "graph" : "static-eager");
+  const int result = RUN_ALL_TESTS();
+#if USE_NPU
+  if (npu_initialized) {
+    try {
+      torch::npu::synchronize();
+      torch_npu::finalize_npu();
+    } catch (const std::exception& error) {
+      std::fprintf(stderr, "NPU shutdown failed: %s\n", error.what());
+      return 1;
+    }
+  }
+#endif
+  return result;
 }
 
 /* vim: set expandtab nu ts=2 sw=2 sts=2: */

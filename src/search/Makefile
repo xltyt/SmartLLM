@@ -6,6 +6,7 @@ ARCH := $(shell uname -m)
 MODE ?= cpu
 CUDA_VERSION ?= 12.2
 CANN_VERSION ?= 9.0.0
+CANN_HOME ?= $(if $(ASCEND_HOME_PATH),$(ASCEND_HOME_PATH),/usr/local/Ascend/ascend-toolkit/latest)
 PLATFORM ?= amd64
 
 VERSION=$(shell awk -F'|' '{print $$2}' ../../README.md | sed '/^ *$$/d' | awk -F'`' '{print $$2}' | tail -1)
@@ -58,6 +59,8 @@ else
     TORCH_LIB = -L$(THIRD_DIR)/torch/cpu/lib/ -Wl,--no-as-needed -ltorch_npu -Wl,--as-needed -ltorch_cpu -ltorch -lc10
     TORCH_INCLUDE = -I$(THIRD_DIR)/torch/cpu/include
     TORCH_INCLUDE += -I$(THIRD_DIR)/torch/cpu/include/torch/csrc/api/include/
+    TORCH_INCLUDE += -I$(TORCH_ROOT)/include/third_party/acl/inc
+    TORCH_INCLUDE += -I$(CANN_HOME)/include
   else
     TORCH_ROOT = $(THIRD_DIR)/torch/cpu
     TORCH_LIB = -ltorch_cpu -ltorch -lc10
@@ -146,6 +149,7 @@ SOURCES += \
   layers/rotary_embedding.o \
   layers/sampler.o \
   model/qwen3.o \
+  model/qwen3_graph.o \
   model/kv_cache.o \
   token/core_bpe.cpp \
   token/tiktoken.cpp \
@@ -214,6 +218,7 @@ $(TEST_DIR)/$(TEST_MODEL_UTILS_MODULE_NAME) : \
 $(TEST_DIR)/$(TEST_MODEL_QWEN3_MODULE_NAME) : \
 	$(OBJS_DIR)/model/test_qwen3.o \
 	$(OBJS_DIR)/model/qwen3.o \
+	$(OBJS_DIR)/model/qwen3_graph.o \
 	$(OBJS_DIR)/model/kv_cache.o \
 	$(OBJS_DIR)/layers/layer_norm.o \
 	$(OBJS_DIR)/utils/model_utils.o \
@@ -235,9 +240,12 @@ $(TEST_DIR)/test_token : \
 	$(CXX) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) $(WEB_LIBPATHS) $(WEB_LIBS) -Wl,-rpath=../lib -Wl,-rpath=lib -lgtest
 	$(STRIP) $@
 
+# Rebuild graph users when its class layout changes.
+$(OBJS_DIR)/model/qwen3_graph.o $(OBJS_DIR)/model/test_qwen3.o: model/qwen3_graph.h
+
 $(OBJS_DIR)/%.o:%.cpp
 	@mkdir -p $(shell dirname $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $? -o $@
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 $(OBJS_DIR)/%.o:%.cc
 	@mkdir -p $(shell dirname $@)
 	$(CC) $(CFLAGS) $(INCLUDES) -c $? -o $@

@@ -1,4 +1,7 @@
 #!/bin/bash
+# Examples (additional gtest flags are forwarded to each test binary):
+#   bash run_test.sh --decode_graph=false --gtest_filter=Qwen3RunnerCache.Perf
+#   bash run_test.sh --decode_graph=true --gtest_filter=Qwen3RunnerCache.Perf
 
 CUR_FILE=`readlink -f $0`
 CUR_DIR=`dirname $CUR_FILE`
@@ -29,35 +32,35 @@ for MODEL_NAME in "${MODEL_NAMES[@]}"; do
     export OMP_NUM_THREADS=32
     
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_emb.py
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelEmb
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelEmb "$@" || exit $?
     
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_input_layernorm.py 0
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayerInputLayer0
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayerInputLayer0 "$@" || exit $?
     
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_self_attn.py 0
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayerAttn0
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayerAttn0 "$@" || exit $?
     
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_layer.py 0
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayer0
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayer0 "$@" || exit $?
     
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_layer.py 1
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayer1
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3ModelLayer1 "$@" || exit $?
     
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_rotary_emb.py
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3RotaryEmb
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3RotaryEmb "$@" || exit $?
     
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3AttentionMask
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3AttentionMask "$@" || exit $?
     
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_model.py
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3Model
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3Model "$@" || exit $?
     
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_lm.py
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3Lm
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3Lm "$@" || exit $?
     
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_runner.py
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3Runner
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Model.Qwen3Runner "$@" || exit $?
     
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Qwen3RunnerCache.*
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3 --gtest_filter=Qwen3RunnerCache.* "$@" || exit $?
   fi
   if [ ! -f ./test_runner.pt ] || [ ! -f ./test_runner_logits.pt ]; then
     MODEL_NAME=${MODEL_NAME} python ${CUR_DIR}/test_runner.py || exit 1
@@ -66,14 +69,12 @@ for MODEL_NAME in "${MODEL_NAMES[@]}"; do
   export OMP_NUM_THREADS=1
   which nvidia-smi &> /dev/null
   if [ $? -eq 0 ]; then
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/gpu/12.2/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_gpu_12.2 --gtest_filter=Qwen3RunnerCache.*
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch/gpu/12.2/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_gpu_12.2 --gtest_filter=Qwen3RunnerCache.* "$@" || exit $?
   fi
   
   which npu-smi &> /dev/null
   if [ $? -eq 0 ]; then
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch_npu/lib/:${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_npu_9.0.0 --gtest_filter=Qwen3RunnerCache.*
-    
-    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch_npu/lib/:${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_npu_9.0.0 --gtest_filter=Qwen3StaticDecode.*
+    MODEL_NAME=${MODEL_NAME} LD_LIBRARY_PATH=${ROOT_DIR}/${ARCH_NAME}/local/torch_npu/lib/:${ROOT_DIR}/${ARCH_NAME}/local/torch/cpu/lib/:$LD_LIBRARY_PATH ../test_model_qwen3_npu_9.0.0 --gtest_filter='Qwen3RunnerCache.*:Qwen3StaticDecode.*' "$@" || exit $?
   fi
   cd ..
 done
