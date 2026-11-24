@@ -26,6 +26,7 @@
 #include "utils/model_utils.h"
 #include "model/qwen3.h"
 #include "model/qwen3_graph.h"
+#include "model/qwen3_runner.h"
 #include "token/qwen_token.h"
 #include <algorithm>
 #include <cmath>
@@ -470,100 +471,31 @@ class Qwen3RunnerCache : public ::testing::Test {
     device = torch::Device(torch::kCPU);
 #endif
 
-    auto config = nlohmann::json::parse(std::ifstream("/data/" + model_name + "/config.json"));
-    int max_seq_len = 2048;
-    int batch_size = 1;
-    LOG(INFO) << "Init KV Cache...";
-    kv_cache = new KVCache(
-      config["num_hidden_layers"],
-      batch_size,
-      config["num_key_value_heads"],
-      config["head_dim"],
-      max_seq_len,
-#if USE_GPU
-      torch::kHalf,
-      torch::kCUDA
-#elif USE_NPU
-      torch::kBFloat16,
-      device
+#if USE_NPU
+    const auto dtype = torch::kBFloat16;
 #else
-      torch::kHalf,
-      torch::kCPU
+    const auto dtype = torch::kHalf;
 #endif
-      );
-    LOG(INFO) << "Init KV Cache Finished";
-#if USE_GPU
-    auto tensor_options = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCUDA);
-#elif USE_NPU
-    auto tensor_options = torch::TensorOptions().dtype(torch::kBFloat16).device(device);
-#else
-    auto tensor_options = torch::TensorOptions().dtype(torch::kHalf).device(torch::kCPU);
-#endif
-    model = new Qwen3ForCausalLM(
-      config["vocab_size"],
-      config["hidden_size"],
-      config["num_hidden_layers"],
-      config["num_attention_heads"],
-      config["num_key_value_heads"],
-      config["head_dim"],
-      config["intermediate_size"],
-      config["rms_norm_eps"],
-      kv_cache,
-      tensor_options
-      );
-    LOG(INFO) << "Init Qwen3ForCausalLM Finished";
-    load_module_from_safetensors_dir(*model, "/data/" + model_name);
-    LOG(INFO) << "Load Model Tensors Finished";
-    if (config["tie_word_embeddings"]) {
-      torch::NoGradGuard no_grad;
-      model->lm_head->weight.copy_(model->model->embed_tokens->weight);
-      LOG(INFO) << "Load LM Head Finished";
-    }
-    {
-      torch::NoGradGuard no_grad;
-      for (auto& param : model->parameters()) {
-        if (!param.is_contiguous()) {
-          param.data() = param.data().contiguous();
-        }
-      }
-      LOG(INFO) << "Contiguous Finished";
-    }
-    model->eval();
-#if USE_GPU
-    model->to(torch::kCUDA);
-    model->to(torch::kHalf);
-#elif USE_NPU
-    model->to(device);
-    model->to(torch::kBFloat16);
-#else
-    model->to(torch::kHalf);
-#endif
-    model->prepare_fused_weights();
+    runner = std::make_unique<Qwen3Runner>("/data/" + model_name, device, dtype,
+                                          2048, FLAGS_decode_graph);
     LOG(INFO) << "Model Loaded";
   }
 
-  static void TearDownTestSuite() {
-    delete model;
-    model = nullptr;
-    delete kv_cache;
-    kv_cache = nullptr;
-  }
+  static void TearDownTestSuite() { runner.reset(); }
 
   void SetUp() override {
-    ASSERT_NE(kv_cache, nullptr);
-    kv_cache->reset();
+    ASSERT_NE(runner, nullptr);
+    runner->reset();
   }
 
   static std::string model_name;
   static torch::Device device;
-  static KVCache *kv_cache;
-  static Qwen3ForCausalLM *model;
+  static std::unique_ptr<Qwen3Runner> runner;
 };
 
 std::string Qwen3RunnerCache::model_name;
 torch::Device Qwen3RunnerCache::device = torch::Device(torch::kCPU);
-KVCache *Qwen3RunnerCache::kv_cache = nullptr;
-Qwen3ForCausalLM *Qwen3RunnerCache::model = nullptr;
+std::unique_ptr<Qwen3Runner> Qwen3RunnerCache::runner;
 
 TEST_F(Qwen3RunnerCache, Correctness) {
   std::string content;
@@ -594,20 +526,8 @@ TEST_F(Qwen3RunnerCache, Correctness) {
     static_cast<int64_t>(ref_output_ids.size()) - prompt_len);
   ASSERT_EQ(gen_len, ref_logits.size(0));
   ASSERT_GT(gen_len, 0);
-  ASSERT_LE(prompt_len + gen_len - 1, kv_cache->capacity());
-  auto decode_token = torch::zeros({1, 1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
-  auto decode_position = torch::zeros({1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
-  DecodeContext decode_context{decode_position, kv_cache->capacity()};
-  std::unique_ptr<Qwen3DecodeGraph> decode_graph;
-  if (FLAGS_decode_graph) {
-    decode_graph = std::make_unique<Qwen3DecodeGraph>(*model, *kv_cache, kv_cache->capacity());
-  }
-  auto decode = [&](int64_t token, int64_t position) {
-    if (decode_graph) return decode_graph->forward(token, position);
-    decode_token.fill_(token);
-    decode_position.fill_(position);
-    return model->forward_static_decode(decode_token, decode_context);
-  };
+  ASSERT_LE(prompt_len + gen_len - 1, runner->capacity());
+  const int64_t replays_before = runner->replay_count();
 
   std::vector<int64_t> greedy_tokens = ref_input_ids;
   float max_abs_err = 0.0f;
@@ -683,11 +603,7 @@ TEST_F(Qwen3RunnerCache, Correctness) {
     return selected;
   };
 
-  auto logits = model->forward(
-    ref_input_ids,
-    1,
-    0
-    );
+  auto logits = runner->prefill(ref_input_ids);
   eval_step(0, logits);
   int64_t feed = ref_output_ids[prompt_len];
   for (int64_t step = 1; step < gen_len; ++step) {
@@ -695,18 +611,14 @@ TEST_F(Qwen3RunnerCache, Correctness) {
       LOG(INFO) << "EOS End at teacher-force step[" << step - 1 << "]";
       break;
     }
-#if 0
-    logits = model->forward({feed}, /*logits_to_keep=*/1, prompt_len + step - 1);
-#else
-    logits = decode(feed, prompt_len + step - 1);
-#endif
+    logits = runner->decode(feed, prompt_len + step - 1);
     eval_step(step, logits);
     feed = ref_output_ids[prompt_len + step];
   }
   const int eval_steps = match_count + allowed_mismatch + hard_mismatch;
-  if (decode_graph) {
-    EXPECT_EQ(decode_graph->capture_count(), eval_steps > 1 ? 1 : 0);
-    EXPECT_EQ(decode_graph->replay_count(), std::max(eval_steps - 1, 0));
+  if (runner->graph_enabled()) {
+    if (eval_steps > 1) EXPECT_EQ(runner->capture_count(), 1);
+    EXPECT_EQ((runner->replay_count() - replays_before), std::max(eval_steps - 1, 0));
   }
   const float mean_abs_err = mean_abs_sum / std::max(eval_steps, 1);
   LOG(INFO) << "Eval match[" << match_count
@@ -754,32 +666,16 @@ TEST_F(Qwen3RunnerCache, Perf) {
     static_cast<int64_t>(max_new_tokens),
     static_cast<int64_t>(ref_output_ids.size()) - prompt_len);
   ASSERT_GT(gen_len, 0);
-  ASSERT_LT(prompt_len, kv_cache->capacity());
-  ASSERT_LE(prompt_len + gen_len - 1, kv_cache->capacity());
-  auto decode_token = torch::zeros({1, 1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
-  auto decode_position = torch::zeros({1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
-  DecodeContext decode_context{decode_position, kv_cache->capacity()};
-  std::unique_ptr<Qwen3DecodeGraph> decode_graph;
-  if (FLAGS_decode_graph) {
-    decode_graph = std::make_unique<Qwen3DecodeGraph>(*model, *kv_cache, kv_cache->capacity());
-  }
-  auto decode = [&](int64_t token, int64_t position) {
-    if (decode_graph) return decode_graph->forward(token, position);
-    decode_token.fill_(token);
-    decode_position.fill_(position);
-    return model->forward_static_decode(decode_token, decode_context);
-  };
+  ASSERT_LT(prompt_len, runner->capacity());
+  ASSERT_LE(prompt_len + gen_len - 1, runner->capacity());
+  const int64_t replays_before = runner->replay_count();
 
   {
-    auto warmup_logits = model->forward(ref_input_ids, 1, 0);
+    auto warmup_logits = runner->prefill(ref_input_ids);
     const int64_t warmup_token = greedy_token_id(warmup_logits);
-#if 0
-    (void)model->forward({warmup_token}, 1, prompt_len);
-#else
-    (void)decode(warmup_token, prompt_len);
-#endif
+    (void)runner->decode(warmup_token, prompt_len);
     sync_device();
-    kv_cache->reset();
+    runner->reset();
   }
 
   constexpr int kPerfRuns = 5;
@@ -789,11 +685,7 @@ TEST_F(Qwen3RunnerCache, Perf) {
   for (int run = 0; run < kPerfRuns; ++run) {
     sync_device();
     uint64_t time_start = mycommon::getMilliTime();
-    auto logits = model->forward(
-      ref_input_ids,
-      1,
-      0
-      );
+    auto logits = runner->prefill(ref_input_ids);
     sync_device();
     const uint64_t time_prefill = mycommon::getMilliTime() - time_start;
 
@@ -805,29 +697,25 @@ TEST_F(Qwen3RunnerCache, Perf) {
       if (step + 1 >= gen_len) {
         break;
       }
-#if 0
-      logits = model->forward({next_token}, /*logits_to_keep=*/1, prompt_len + step);
-#else
-      logits = decode(next_token, prompt_len + step);
-#endif
+      logits = runner->decode(next_token, prompt_len + step);
     }
     sync_device();
     const uint64_t time_decode = mycommon::getMilliTime() - time_start;
     gen_tokens = static_cast<int64_t>(greedy_tokens.size()) - prompt_len;
     time_prefill_sum += time_prefill;
     time_decode_sum += time_decode;
-    kv_cache->reset();
+    runner->reset();
   }
 
-  if (decode_graph) {
-    EXPECT_EQ(decode_graph->capture_count(), 1);
-    EXPECT_EQ(decode_graph->replay_count(), 1 + kPerfRuns * (gen_len - 1));
-    LOG(INFO) << "Graph captures[" << decode_graph->capture_count()
-              << "] replays[" << decode_graph->replay_count() << "]";
+  if (runner->graph_enabled()) {
+    EXPECT_EQ(runner->capture_count(), 1);
+    EXPECT_EQ((runner->replay_count() - replays_before), 1 + kPerfRuns * (gen_len - 1));
+    LOG(INFO) << "Graph captures[" << runner->capture_count()
+              << "] replays[" << (runner->replay_count() - replays_before) << "]";
   }
   const float time_prefill = static_cast<float>(time_prefill_sum) / kPerfRuns;
   const float time_decode = static_cast<float>(time_decode_sum) / kPerfRuns;
-  LOG(INFO) << "DecodeGraph[" << (decode_graph ? "on" : "off") << "] "
+  LOG(INFO) << "DecodeGraph[" << (runner->graph_enabled() ? "on" : "off") << "] "
             << "Runs[" << kPerfRuns << "] "
             << "TTFT[" << time_prefill << "] "
             << "Decode Time[" << time_decode << "] "
@@ -836,6 +724,27 @@ TEST_F(Qwen3RunnerCache, Perf) {
             << "OutPerf[" << ((float)gen_tokens * 1000 / time_decode) << "] "
             << "Input[" << prompt_len << "] "
             << "Output[" << gen_tokens << "]";
+}
+
+TEST_F(Qwen3RunnerCache, ResetReusesGraphAndClearsRequest) {
+  EXPECT_THROW(runner->prefill({}), c10::Error);
+  EXPECT_THROW(runner->decode(1, runner->capacity()), c10::Error);
+  EXPECT_THROW(runner->decode(-1, 0), c10::Error);
+  EXPECT_THROW(runner->decode(1, -1), c10::Error);
+  const std::vector<int64_t> prompt{1, 4, 9};
+  auto first_prefill = runner->prefill(prompt).clone();
+  auto first_decode = runner->decode(7, 3).clone();
+  const int64_t captures = runner->capture_count();
+  // Leave a different, longer request in the cache before reusing the runner.
+  runner->reset();
+  (void)runner->prefill({2, 5, 8, 11, 14});
+  (void)runner->decode(17, 5);
+  runner->reset();
+  auto next_prefill = runner->prefill(prompt);
+  auto next_decode = runner->decode(7, 3);
+  EXPECT_TRUE(torch::equal(first_prefill, next_prefill));
+  EXPECT_TRUE(torch::equal(first_decode, next_decode));
+  EXPECT_EQ(runner->capture_count(), captures);
 }
 
 #if !USE_GPU
