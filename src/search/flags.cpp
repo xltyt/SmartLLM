@@ -15,5 +15,15 @@ DEFINE_int32(http_monitor_port, 28801, "");
 DEFINE_int32(timeout_connect, 1000 * 500, "");
 DEFINE_int32(timeout_read, 1000 * 500, "");
 DEFINE_bool(ipv6, false, "");
+DEFINE_string(model_path, "", "Model directory");
+#if USE_NPU
+DEFINE_string(device, "npu:0", "Inference device");
+#elif USE_GPU
+DEFINE_string(device, "cuda:0", "Inference device");
+#else
+DEFINE_string(device, "cpu", "Inference device");
+#endif
+DEFINE_int32(max_seq_len, 2048, "KV cache capacity");
+DEFINE_bool(decode_graph, false, "Use NPU graph for decode");
 
 /* vim: set expandtab nu ts=2 sw=2 sts=2: */

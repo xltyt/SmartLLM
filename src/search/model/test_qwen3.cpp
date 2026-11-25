@@ -901,7 +901,8 @@ int main(int argc, char *argv[]) {
     try {
       torch::npu::synchronize();
       torch_npu::finalize_npu();
-    } catch (const std::exception& error) {
+    }
+    catch (const std::exception& error) {
       std::fprintf(stderr, "NPU shutdown failed: %s\n", error.what());
       return 1;
     }

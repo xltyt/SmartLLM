@@ -18,6 +18,10 @@ DECLARE_int32(http_monitor_port);
 DECLARE_int32(timeout_connect);
 DECLARE_int32(timeout_read);
 DECLARE_bool(ipv6);
+DECLARE_string(model_path);
+DECLARE_string(device);
+DECLARE_int32(max_seq_len);
+DECLARE_bool(decode_graph);
 
 #endif
 

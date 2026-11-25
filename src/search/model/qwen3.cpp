@@ -173,7 +173,8 @@ inline std::pair<torch::Tensor, torch::Tensor> eager_attention_forward(
     if (attention_mask.has_value() && attention_mask->defined()) {
         if (attention_mask->scalar_type() == torch::kBool) {
           attn_weights = attn_weights.masked_fill(*attention_mask, -std::numeric_limits<float>::infinity());
-        } else {
+        }
+        else {
           attn_weights = attn_weights + attention_mask->to(attn_weights.dtype());
         }
     }
@@ -395,7 +396,8 @@ std::tuple<torch::Tensor, torch::Tensor> Qwen3Attention::forward(
     if (decode_context != nullptr) {
       std::tie(key_states, value_states) = _kv_cache->update_static(
         layer_idx, key_states, value_states, *decode_context);
-    } else {
+    }
+    else {
       std::tie(key_states, value_states) = _kv_cache->update(layer_idx, key_states, value_states, start_pos);
     }
   }

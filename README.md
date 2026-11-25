@@ -4,7 +4,7 @@
 git submodule update --init --recursive  
 make -C src 
 
-# Perf(Qwen3-0.6B, 4070)
+# Perf(Qwen3-0.6B, 4070/910B2)
 
 | Date | Content  | TTFT(ms) | TPOT(ms) | Prefill(tok/s) | Output(tok/s) |
 |------|------|------|------|------|------|
@@ -19,3 +19,7 @@ make -C src
 | 2026-11-11 | 融合: qkv融合的拷贝 | 18.4(性能波动) | 16.2 | 1087 | 61.9 |
 | 2026-11-20 | kv形状固定 | 17.6 | 13.5 | 1136.4 | 74.1 |
 | **2026-11-24** | decode支持graph | 18.6 | 8.4 | 1075.3 | 119.2 |
+
+# Perf(Qwen3-0.6B, vLLM-Ascend 0.30.0, 910B2, CANN 9.2.0, 输入512/输出512)
+
+| 2026-11-25 | BF16、batch=1、max_model_len=2048, decode graph | 66.52 | 10.11 | — | 98.92 |

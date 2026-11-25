@@ -151,6 +151,7 @@ SOURCES += \
   model/qwen3.o \
   model/qwen3_graph.o \
   model/qwen3_runner.o \
+  model/qwen3_engine.o \
   model/kv_cache.o \
   token/core_bpe.cpp \
   token/tiktoken.cpp \
@@ -245,6 +246,10 @@ $(TEST_DIR)/test_token : \
 # Rebuild graph users when its class layout changes.
 $(OBJS_DIR)/model/qwen3_graph.o $(OBJS_DIR)/model/qwen3_runner.o $(OBJS_DIR)/model/test_qwen3.o: model/qwen3_graph.h
 $(OBJS_DIR)/model/qwen3_runner.o $(OBJS_DIR)/model/test_qwen3.o: model/qwen3_runner.h
+
+$(OBJS_DIR)/model/qwen3_engine.o: model/qwen3_engine.h model/qwen3_runner.h model/qwen3_graph.h token/qwen_token.h
+$(OBJS_DIR)/main.o: model/qwen3_engine.h flags.h
+$(OBJS_DIR)/flags.o: flags.h
 
 $(OBJS_DIR)/%.o:%.cpp
 	@mkdir -p $(shell dirname $@)
