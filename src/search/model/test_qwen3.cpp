@@ -617,7 +617,9 @@ TEST_F(Qwen3RunnerCache, Correctness) {
   }
   const int eval_steps = match_count + allowed_mismatch + hard_mismatch;
   if (runner->graph_enabled()) {
-    if (eval_steps > 1) EXPECT_EQ(runner->capture_count(), 1);
+    if (eval_steps > 1) {
+      EXPECT_EQ(runner->capture_count(), 1);
+    }
     EXPECT_EQ((runner->replay_count() - replays_before), std::max(eval_steps - 1, 0));
   }
   const float mean_abs_err = mean_abs_sum / std::max(eval_steps, 1);
@@ -801,8 +803,12 @@ TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
   KVCache cache(2, 1, 2, 16, 32, torch::kBFloat16, device);
   Qwen3ForCausalLM model(64, 32, 2, 4, 2, 16, 64, 1e-6f, &cache);
   for (auto& parameter : model.named_parameters()) {
-    if (parameter.key().find("norm") != std::string::npos) parameter.value().fill_(1);
-    else parameter.value().normal_(0, .05);
+    if (parameter.key().find("norm") != std::string::npos) {
+      parameter.value().fill_(1);
+    }
+    else {
+      parameter.value().normal_(0, .05);
+    }
   }
   model.eval();
   auto original_frequency = model.named_buffers()["model.rotary_emb.inv_freq"].clone();
@@ -848,14 +854,18 @@ TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
     EXPECT_THROW(graph.forward(64, 3), c10::Error);
     std::vector<torch::Tensor> retained;
     for (int run = 0; run < 2; ++run) {
-      if (run == 1) cache.reset();
+      if (run == 1) {
+        cache.reset();
+      }
       (void)model.forward(prompt);
       for (int pos = 3; pos < 20; ++pos) {
         auto actual = graph.forward((pos * 7) % 64, pos);
         EXPECT_TRUE(torch::allclose(actual.to(torch::kFloat32),
                                   expected[pos - 3].to(torch::kFloat32), 1e-2, 1e-3))
           << "graph run " << run << ", position " << pos;
-        if (run == 0) retained.push_back(actual);
+        if (run == 0) {
+          retained.push_back(actual);
+        }
       }
     }
     for (size_t i = 0; i < retained.size(); ++i) {

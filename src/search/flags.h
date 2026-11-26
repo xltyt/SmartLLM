@@ -22,6 +22,7 @@ DECLARE_string(model_path);
 DECLARE_string(device);
 DECLARE_int32(max_seq_len);
 DECLARE_bool(decode_graph);
+DECLARE_string(profile_dir);
 
 #endif
 

@@ -23,6 +23,7 @@ public:
   struct Result {
     std::string text;
     std::string finish_reason;
+    std::string profile_dir;
     int prompt_tokens = 0;
     int completion_tokens = 0;
   };
@@ -33,22 +34,29 @@ public:
     const std::string& model_path,
     const std::string& device,
     int max_seq_len,
-    bool decode_graph
+    bool decode_graph,
+    const std::string& profile_dir = ""
     );
   ~Qwen3Engine();
   Result generate(const Request& request, TokenCallback on_token = {});
+  void start_profile();
+  std::string stop_profile();
 
 private:
   struct Job {
+    enum class Type { Generate, StartProfile, StopProfile };
+    Type type = Type::Generate;
     Request request;
     TokenCallback on_token;
     std::promise<Result> result;
   };
+  Result submit(const std::shared_ptr<Job>& job);
   void run(
     std::string model_path,
     std::string device,
     int max_seq_len,
     bool decode_graph,
+    std::string profile_dir,
     std::promise<void> ready
     );
   Result generate(

@@ -120,7 +120,8 @@ static void Daemonize() {
 
 class MergeServiceImpl : public proto::search {
 public:
-  explicit MergeServiceImpl(Qwen3Engine& engine) : _engine(engine) {
+  explicit MergeServiceImpl(Qwen3Engine& engine)
+    : _engine(engine) {
   }
   virtual ~MergeServiceImpl() {
   }
@@ -237,6 +238,32 @@ public:
       }
       return;
     }
+    else if ("start_profile" == unresolved_path || "stop_profile" == unresolved_path) {
+      if (http_method != brpc::HTTP_METHOD_POST) {
+        cntl->http_response().set_status_code(405);
+        cntl->response_attachment().append(GenRespBody(-1, "POST required"));
+        return;
+      }
+      try {
+        std::string directory = FLAGS_profile_dir;
+        if ("start_profile" == unresolved_path) {
+          _engine.start_profile();
+        }
+        else {
+          directory = _engine.stop_profile();
+        }
+        cntl->response_attachment().append(GenRespBody(0, "", directory));
+      }
+      catch (const std::invalid_argument& error) {
+        cntl->http_response().set_status_code(400);
+        cntl->response_attachment().append(GenRespBody(-1, error.what()));
+      }
+      catch (const std::exception& error) {
+        cntl->http_response().set_status_code(500);
+        cntl->response_attachment().append(GenRespBody(-1, error.what()));
+      }
+      return;
+    }
     else if ("upgrade" == unresolved_path) {
       if (brpc::HTTP_METHOD_POST == http_method) {
         cntl->response_attachment().append("ok\n");
@@ -312,7 +339,7 @@ int main(int argc, char *argv[]) {
   std::unique_ptr<Qwen3Engine> engine;
   try {
     engine = std::make_unique<Qwen3Engine>(FLAGS_model_path, FLAGS_device,
-                                         FLAGS_max_seq_len, FLAGS_decode_graph);
+                                         FLAGS_max_seq_len, FLAGS_decode_graph, FLAGS_profile_dir);
   }
   catch (const std::exception& error) {
     LOG(ERROR) << "Engine startup failed: " << error.what();

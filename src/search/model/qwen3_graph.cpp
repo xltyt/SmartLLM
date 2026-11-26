@@ -25,8 +25,12 @@ Qwen3DecodeGraph::Qwen3DecodeGraph(Qwen3ForCausalLM& model, KVCache& cache, int6
 Qwen3DecodeGraph::~Qwen3DecodeGraph() {
 #if USE_NPU
   try {
-    if (_previous_stream) _previous_stream->synchronize();
-    if (_capture_stream) _capture_stream->synchronize();
+    if (_previous_stream) {
+      _previous_stream->synchronize();
+    }
+    if (_capture_stream) {
+      _capture_stream->synchronize();
+    }
   }
   catch (const std::exception& error) {
     TORCH_WARN("Decode graph teardown synchronization failed: ", error.what());
@@ -45,7 +49,9 @@ void Qwen3DecodeGraph::update_inputs(int64_t token_id, int64_t position) {
 
 void Qwen3DecodeGraph::order_stream(c10_npu::NPUStream current) {
   // Static IO and the KV cache cannot be used concurrently on two streams.
-  if (_previous_stream && *_previous_stream != current) _previous_stream->synchronize();
+  if (_previous_stream && *_previous_stream != current) {
+    _previous_stream->synchronize();
+  }
   _previous_stream = current;
 }
 

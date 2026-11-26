@@ -57,6 +57,7 @@ else
   ifeq ($(MODE),npu)
     TORCH_ROOT = $(THIRD_DIR)/torch_npu/
     TORCH_LIB = -L$(THIRD_DIR)/torch/cpu/lib/ -Wl,--no-as-needed -ltorch_npu -Wl,--as-needed -ltorch_cpu -ltorch -lc10
+    TORCH_LIB += -L$(CANN_HOME)/lib64 -lascendcl -lmsprofiler
     TORCH_INCLUDE = -I$(THIRD_DIR)/torch/cpu/include
     TORCH_INCLUDE += -I$(THIRD_DIR)/torch/cpu/include/torch/csrc/api/include/
     TORCH_INCLUDE += -I$(TORCH_ROOT)/include/third_party/acl/inc

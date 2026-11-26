@@ -1,7 +1,7 @@
 CURRENT_PATH := $(abspath $(lastword $(MAKEFILE_LIST)))
 CURRENT_DIR := $(shell dirname $(CURRENT_PATH))
 ARCH := $(shell uname -m)
-CPU_COUNT := 4
+CPU_COUNT := 16
 
 all : prep
 

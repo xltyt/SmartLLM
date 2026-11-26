@@ -6,6 +6,7 @@
 /*/dict
 /*/etc
 /build
+/logs
 *.pt
 *.safetensors
 *.swp

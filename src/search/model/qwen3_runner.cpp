@@ -41,7 +41,9 @@ Qwen3Runner::Qwen3Runner(const std::string& model_path, torch::Device device,
       _model->lm_head->weight.copy_(_model->model->embed_tokens->weight);
     }
     for (auto& param : _model->parameters()) {
-      if (!param.is_contiguous()) param.data() = param.data().contiguous();
+      if (!param.is_contiguous()) {
+        param.data() = param.data().contiguous();
+      }
     }
   }
   _model->eval();
@@ -68,7 +70,9 @@ torch::Tensor Qwen3Runner::prefill(const std::vector<int64_t>& input_ids) {
 torch::Tensor Qwen3Runner::decode(int64_t token_id, int64_t position) {
   TORCH_CHECK(position >= 0 && position < capacity(), "Decode position exceeds KV capacity");
   TORCH_CHECK(token_id >= 0 && token_id < _vocab_size, "Decode token is outside the vocabulary");
-  if (_decode_graph) return _decode_graph->forward(token_id, position);
+  if (_decode_graph) {
+    return _decode_graph->forward(token_id, position);
+  }
 #if USE_GPU
   return _model->forward({token_id}, 1, position);
 #else

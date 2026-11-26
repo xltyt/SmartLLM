@@ -25,5 +25,6 @@ DEFINE_string(device, "cpu", "Inference device");
 #endif
 DEFINE_int32(max_seq_len, 2048, "KV cache capacity");
 DEFINE_bool(decode_graph, false, "Use NPU graph for decode");
+DEFINE_string(profile_dir, "", "NPU profiling output directory; empty disables profiling");
 
 /* vim: set expandtab nu ts=2 sw=2 sts=2: */
