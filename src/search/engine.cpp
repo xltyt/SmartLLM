@@ -1,5 +1,5 @@
-#include "qwen3_engine.h"
-#include "qwen3_runner.h"
+#include "engine.h"
+#include "runner.h"
 #include "token/qwen_token.h"
 #include <stdexcept>
 #include <cstdlib>
@@ -70,7 +70,7 @@ static std::string take_text(std::string& pending, bool final) {
   return text;
 }
 
-Qwen3Engine::Qwen3Engine(
+Engine::Engine(
   const std::string& model_path,
   const std::string& device,
   int max_seq_len,
@@ -80,7 +80,7 @@ Qwen3Engine::Qwen3Engine(
   std::promise<void> ready;
   auto initialized = ready.get_future();
   _thread = std::thread(
-    &Qwen3Engine::run,
+    &Engine::run,
     this,
     model_path,
     device,
@@ -98,7 +98,7 @@ Qwen3Engine::Qwen3Engine(
   }
 }
 
-Qwen3Engine::~Qwen3Engine() {
+Engine::~Engine() {
   {
     std::lock_guard<std::mutex> lock(_mutex);
     _stopping = true;
@@ -107,26 +107,26 @@ Qwen3Engine::~Qwen3Engine() {
   _thread.join();
 }
 
-Qwen3Engine::Result Qwen3Engine::generate(const Request& request, TokenCallback on_token) {
+Engine::Result Engine::generate(const Request& request, TokenCallback on_token) {
   auto job = std::make_shared<Job>();
   job->request = request;
   job->on_token = std::move(on_token);
   return submit(job);
 }
 
-void Qwen3Engine::start_profile() {
+void Engine::start_profile() {
   auto job = std::make_shared<Job>();
   job->type = Job::Type::StartProfile;
   (void)submit(job);
 }
 
-std::string Qwen3Engine::stop_profile() {
+std::string Engine::stop_profile() {
   auto job = std::make_shared<Job>();
   job->type = Job::Type::StopProfile;
   return submit(job).profile_dir;
 }
 
-Qwen3Engine::Result Qwen3Engine::submit(const std::shared_ptr<Job>& job) {
+Engine::Result Engine::submit(const std::shared_ptr<Job>& job) {
   auto result = job->result.get_future();
   {
     std::lock_guard<std::mutex> lock(_mutex);
@@ -139,7 +139,7 @@ Qwen3Engine::Result Qwen3Engine::submit(const std::shared_ptr<Job>& job) {
   return result.get();
 }
 
-void Qwen3Engine::run(
+void Engine::run(
   std::string model_path,
   std::string device,
   int max_seq_len,
@@ -172,7 +172,7 @@ void Qwen3Engine::run(
     const auto dtype = torch::kHalf;
 #endif
     // These objects are destroyed on the inference thread before NPU finalization.
-    Qwen3Runner runner(model_path, torch::Device(device), dtype, max_seq_len, decode_graph);
+    Runner runner(model_path, torch::Device(device), dtype, max_seq_len, decode_graph);
     QwenToken tokenizer(model_path);
     (void)runner.prefill({1});
     if (max_seq_len > 1) {
@@ -267,8 +267,8 @@ void Qwen3Engine::run(
 #endif
 }
 
-Qwen3Engine::Result Qwen3Engine::generate(
-  Qwen3Runner& runner,
+Engine::Result Engine::generate(
+  Runner& runner,
   QwenToken& tokenizer,
   const Job& job
   ) {

@@ -13,7 +13,7 @@
 #include <common.h>
 #include <base64.h>
 #include "flags.h"
-#include "model/qwen3_engine.h"
+#include "engine.h"
 #include <atomic>
 #include <ctime>
 
@@ -60,7 +60,7 @@ std::string GenRespBody(int _status, const std::string& _error, const std::strin
 }
 
 static std::string CompletionJson(const std::string& id, uint64_t created,
-                                  const std::string& text, const Qwen3Engine::Result* result) {
+                                  const std::string& text, const Engine::Result* result) {
   rapidjson::Document doc_result;
   auto& allocator_result = doc_result.GetAllocator();
   rapidjson::Value root(rapidjson::kObjectType), choice(rapidjson::kObjectType);
@@ -120,7 +120,7 @@ static void Daemonize() {
 
 class MergeServiceImpl : public proto::search {
 public:
-  explicit MergeServiceImpl(Qwen3Engine& engine)
+  explicit MergeServiceImpl(Engine& engine)
     : _engine(engine) {
   }
   virtual ~MergeServiceImpl() {
@@ -178,7 +178,7 @@ public:
         cntl->response_attachment().append(CompletionError("Expected a string prompt, integer max_tokens, boolean stream/ignore_eos; only temperature=0 and n=1 are supported", true));
         return;
       }
-      Qwen3Engine::Request request;
+      Engine::Request request;
       request.prompt = GET_JSON_STRING_BINARY(doc, "prompt", "");
       request.max_tokens = GET_JSON_INT(doc, "max_tokens", 128);
       request.ignore_eos = GET_JSON_BOOL(doc, "ignore_eos", false);
@@ -193,7 +193,7 @@ public:
       const std::string id = "cmpl-" + std::to_string(created) + "-" + std::to_string(++sequence);
       butil::intrusive_ptr<brpc::ProgressiveAttachment> attachment;
       try {
-        Qwen3Engine::TokenCallback on_token;
+        Engine::TokenCallback on_token;
         if (stream) {
           on_token = [&](const std::string& text) {
             if (!attachment) {
@@ -302,7 +302,7 @@ public:
     return;
   }
 private:
-  Qwen3Engine& _engine;
+  Engine& _engine;
 };
 
 int main(int argc, char *argv[]) {
@@ -336,9 +336,9 @@ int main(int argc, char *argv[]) {
     LOG(ERROR) << "--model_path is required";
     return 1;
   }
-  std::unique_ptr<Qwen3Engine> engine;
+  std::unique_ptr<Engine> engine;
   try {
-    engine = std::make_unique<Qwen3Engine>(FLAGS_model_path, FLAGS_device,
+    engine = std::make_unique<Engine>(FLAGS_model_path, FLAGS_device,
                                          FLAGS_max_seq_len, FLAGS_decode_graph, FLAGS_profile_dir);
   }
   catch (const std::exception& error) {

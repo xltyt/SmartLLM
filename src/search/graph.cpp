@@ -1,11 +1,11 @@
-#include "qwen3_graph.h"
-#include "qwen3.h"
+#include "graph.h"
+#include "model/qwen3/qwen3.h"
 
 #if USE_NPU
 #include <torch_npu/csrc/core/npu/NPUGuard.h>
 #endif
 
-bool Qwen3DecodeGraph::supported() {
+bool DecodeGraph::supported() {
 #if USE_NPU
   return true;
 #else
@@ -13,7 +13,7 @@ bool Qwen3DecodeGraph::supported() {
 #endif
 }
 
-Qwen3DecodeGraph::Qwen3DecodeGraph(Qwen3ForCausalLM& model, KVCache& cache, int64_t context_len)
+DecodeGraph::DecodeGraph(Qwen3ForCausalLM& model, KVCache& cache, int64_t context_len)
   : _model(model), _device(model.model->embed_tokens->weight.device()),
     _context_len(context_len) {
   TORCH_CHECK(supported(), "Decode graph requires an NPU build");
@@ -22,7 +22,7 @@ Qwen3DecodeGraph::Qwen3DecodeGraph(Qwen3ForCausalLM& model, KVCache& cache, int6
               "Decode graph requires batch=1 and a valid fixed context length");
 }
 
-Qwen3DecodeGraph::~Qwen3DecodeGraph() {
+DecodeGraph::~DecodeGraph() {
 #if USE_NPU
   try {
     if (_previous_stream) {
@@ -39,7 +39,7 @@ Qwen3DecodeGraph::~Qwen3DecodeGraph() {
 }
 
 #if USE_NPU
-void Qwen3DecodeGraph::update_inputs(int64_t token_id, int64_t position) {
+void DecodeGraph::update_inputs(int64_t token_id, int64_t position) {
   auto* values = _host_input.data_ptr<int64_t>();
   values[0] = token_id;
   values[1] = position;
@@ -47,7 +47,7 @@ void Qwen3DecodeGraph::update_inputs(int64_t token_id, int64_t position) {
   _device_input.copy_(_host_input, /*non_blocking=*/false);
 }
 
-void Qwen3DecodeGraph::order_stream(c10_npu::NPUStream current) {
+void DecodeGraph::order_stream(c10_npu::NPUStream current) {
   // Static IO and the KV cache cannot be used concurrently on two streams.
   if (_previous_stream && *_previous_stream != current) {
     _previous_stream->synchronize();
@@ -55,7 +55,7 @@ void Qwen3DecodeGraph::order_stream(c10_npu::NPUStream current) {
   _previous_stream = current;
 }
 
-void Qwen3DecodeGraph::capture(int64_t token_id, int64_t position,
+void DecodeGraph::capture(int64_t token_id, int64_t position,
                               c10_npu::NPUStream caller_stream) {
   _capture_stream = c10_npu::getNPUStreamFromPool(_device.index());
   _graph = std::make_unique<c10_npu::NPUGraph>();
@@ -101,7 +101,7 @@ void Qwen3DecodeGraph::capture(int64_t token_id, int64_t position,
 }
 #endif
 
-torch::Tensor Qwen3DecodeGraph::forward(int64_t token_id, int64_t start_pos) {
+torch::Tensor DecodeGraph::forward(int64_t token_id, int64_t start_pos) {
   torch::NoGradGuard no_grad;
   TORCH_CHECK(!_capture_failed, "Previous NPU graph capture failed; recover the runtime before continuing");
   TORCH_CHECK(!_model.is_training(), "Decode graph requires eval mode");
@@ -133,11 +133,11 @@ torch::Tensor Qwen3DecodeGraph::forward(int64_t token_id, int64_t start_pos) {
 #endif
 }
 
-int64_t Qwen3DecodeGraph::capture_count() const {
+int64_t DecodeGraph::capture_count() const {
   return _captures;
 }
 
-int64_t Qwen3DecodeGraph::replay_count() const {
+int64_t DecodeGraph::replay_count() const {
   return _replays;
 }
 

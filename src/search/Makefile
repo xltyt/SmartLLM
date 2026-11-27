@@ -149,11 +149,11 @@ SOURCES += \
   layers/layer_norm.o \
   layers/rotary_embedding.o \
   layers/sampler.o \
-  model/qwen3.o \
-  model/qwen3_graph.o \
-  model/qwen3_runner.o \
-  model/qwen3_engine.o \
-  model/kv_cache.o \
+  model/qwen3/qwen3.o \
+  graph.o \
+  runner.o \
+  engine.o \
+  kv_cache.o \
   token/core_bpe.cpp \
   token/tiktoken.cpp \
   token/qwen_token.cpp \
@@ -219,11 +219,11 @@ $(TEST_DIR)/$(TEST_MODEL_UTILS_MODULE_NAME) : \
 	$(STRIP) $@
 
 $(TEST_DIR)/$(TEST_MODEL_QWEN3_MODULE_NAME) : \
-	$(OBJS_DIR)/model/test_qwen3.o \
-	$(OBJS_DIR)/model/qwen3.o \
-	$(OBJS_DIR)/model/qwen3_graph.o \
-	$(OBJS_DIR)/model/qwen3_runner.o \
-	$(OBJS_DIR)/model/kv_cache.o \
+	$(OBJS_DIR)/model/qwen3/test_qwen3.o \
+	$(OBJS_DIR)/model/qwen3/qwen3.o \
+	$(OBJS_DIR)/graph.o \
+	$(OBJS_DIR)/runner.o \
+	$(OBJS_DIR)/kv_cache.o \
 	$(OBJS_DIR)/layers/layer_norm.o \
 	$(OBJS_DIR)/utils/model_utils.o \
 	$(OBJS_DIR)/token/core_bpe.o \
@@ -244,12 +244,16 @@ $(TEST_DIR)/test_token : \
 	$(CXX) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) $(WEB_LIBPATHS) $(WEB_LIBS) -Wl,-rpath=../lib -Wl,-rpath=lib -lgtest
 	$(STRIP) $@
 
-# Rebuild graph users when its class layout changes.
-$(OBJS_DIR)/model/qwen3_graph.o $(OBJS_DIR)/model/qwen3_runner.o $(OBJS_DIR)/model/test_qwen3.o: model/qwen3_graph.h
-$(OBJS_DIR)/model/qwen3_runner.o $(OBJS_DIR)/model/test_qwen3.o: model/qwen3_runner.h
+# Shared cache and model declarations are used across directory boundaries.
+$(OBJS_DIR)/kv_cache.o $(OBJS_DIR)/model/qwen3/qwen3.o $(OBJS_DIR)/graph.o $(OBJS_DIR)/runner.o $(OBJS_DIR)/engine.o $(OBJS_DIR)/model/qwen3/test_qwen3.o: kv_cache.h
+$(OBJS_DIR)/model/qwen3/qwen3.o $(OBJS_DIR)/graph.o $(OBJS_DIR)/runner.o $(OBJS_DIR)/engine.o $(OBJS_DIR)/model/qwen3/test_qwen3.o: model/qwen3/qwen3.h
 
-$(OBJS_DIR)/model/qwen3_engine.o: model/qwen3_engine.h model/qwen3_runner.h model/qwen3_graph.h token/qwen_token.h
-$(OBJS_DIR)/main.o: model/qwen3_engine.h flags.h
+# Rebuild graph users when its class layout changes.
+$(OBJS_DIR)/graph.o $(OBJS_DIR)/runner.o $(OBJS_DIR)/model/qwen3/test_qwen3.o: graph.h
+$(OBJS_DIR)/runner.o $(OBJS_DIR)/model/qwen3/test_qwen3.o: runner.h
+
+$(OBJS_DIR)/engine.o: engine.h runner.h graph.h token/qwen_token.h
+$(OBJS_DIR)/main.o: engine.h flags.h
 $(OBJS_DIR)/flags.o: flags.h
 
 $(OBJS_DIR)/%.o:%.cpp
@@ -266,7 +270,7 @@ clean:
 	rm -f $(OBJS_DIR)/layers/test_layers.o
 	rm -f $(OBJS_DIR)/token/test_token.o
 	rm -f $(OBJS_DIR)/utils/test_model_utils.o
-	rm -f $(OBJS_DIR)/model/test_qwen3.o
+	rm -f $(OBJS_DIR)/model/qwen3/test_qwen3.o
 	rm -rf rpc_data
 
 distclean:

@@ -5,7 +5,7 @@
 
 CUR_FILE=`readlink -f $0`
 CUR_DIR=`dirname $CUR_FILE`
-ROOT_DIR=${CUR_DIR}/../../../
+ROOT_DIR=${CUR_DIR}/../../../../
 ARCH=$(uname -m)
 if [ "$ARCH" = "x86_64" ]; then
   ARCH_NAME=amd64

@@ -24,9 +24,9 @@
 #include <string_utils.h>
 #include <timer.h>
 #include "utils/model_utils.h"
-#include "model/qwen3.h"
-#include "model/qwen3_graph.h"
-#include "model/qwen3_runner.h"
+#include "model/qwen3/qwen3.h"
+#include "graph.h"
+#include "runner.h"
 #include "token/qwen_token.h"
 #include <algorithm>
 #include <cmath>
@@ -476,7 +476,7 @@ class Qwen3RunnerCache : public ::testing::Test {
 #else
     const auto dtype = torch::kHalf;
 #endif
-    runner = std::make_unique<Qwen3Runner>("/data/" + model_name, device, dtype,
+    runner = std::make_unique<Runner>("/data/" + model_name, device, dtype,
                                           2048, FLAGS_decode_graph);
     LOG(INFO) << "Model Loaded";
   }
@@ -490,12 +490,12 @@ class Qwen3RunnerCache : public ::testing::Test {
 
   static std::string model_name;
   static torch::Device device;
-  static std::unique_ptr<Qwen3Runner> runner;
+  static std::unique_ptr<Runner> runner;
 };
 
 std::string Qwen3RunnerCache::model_name;
 torch::Device Qwen3RunnerCache::device = torch::Device(torch::kCPU);
-std::unique_ptr<Qwen3Runner> Qwen3RunnerCache::runner;
+std::unique_ptr<Runner> Qwen3RunnerCache::runner;
 
 TEST_F(Qwen3RunnerCache, Correctness) {
   std::string content;
@@ -885,7 +885,7 @@ TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
   }
 #if USE_NPU
   if (FLAGS_decode_graph) {
-    Qwen3DecodeGraph graph(model, cache, 32);
+    DecodeGraph graph(model, cache, 32);
     EXPECT_THROW(graph.forward(1, -1), c10::Error);
     EXPECT_THROW(graph.forward(1, 32), c10::Error);
     EXPECT_THROW(graph.forward(64, 3), c10::Error);
@@ -913,8 +913,8 @@ TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
     EXPECT_EQ(graph.replay_count(), 34);
   }
 #else
-  EXPECT_FALSE(Qwen3DecodeGraph::supported());
-  EXPECT_THROW(Qwen3DecodeGraph(model, cache, 32), c10::Error);
+  EXPECT_FALSE(DecodeGraph::supported());
+  EXPECT_THROW(DecodeGraph(model, cache, 32), c10::Error);
 #endif
   EXPECT_EQ(frequency_address, model.named_buffers()["model.rotary_emb.inv_freq"].data_ptr());
 }
@@ -929,7 +929,7 @@ int main(int argc, char *argv[]) {
     return 2;
   }
   if (FLAGS_decode_graph) {
-    if (!Qwen3DecodeGraph::supported()) {
+    if (!DecodeGraph::supported()) {
       std::fprintf(stderr, "--decode_graph=true requires an NPU build\n");
       return 2;
     }

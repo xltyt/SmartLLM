@@ -1,12 +1,12 @@
-#include "qwen3_runner.h"
+#include "runner.h"
 #include "utils/model_utils.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 
-Qwen3Runner::Qwen3Runner(const std::string& model_path, torch::Device device,
+Runner::Runner(const std::string& model_path, torch::Device device,
                          torch::Dtype dtype, int max_seq_len, bool decode_graph) {
   TORCH_CHECK(max_seq_len > 0, "Runner max sequence length must be positive");
-  TORCH_CHECK(!decode_graph || (Qwen3DecodeGraph::supported() && device.is_privateuseone()),
+  TORCH_CHECK(!decode_graph || (DecodeGraph::supported() && device.is_privateuseone()),
               "Decode graph requires an NPU build and device");
   std::ifstream config_file(model_path + "/config.json");
   TORCH_CHECK(config_file.is_open(), "Cannot open model config: ", model_path, "/config.json");
@@ -54,11 +54,11 @@ Qwen3Runner::Qwen3Runner(const std::string& model_path, torch::Device device,
   _decode_token = torch::zeros({1, 1}, input_options);
   _decode_position = torch::zeros({1}, input_options);
   if (decode_graph) {
-    _decode_graph = std::make_unique<Qwen3DecodeGraph>(*_model, *_kv_cache, capacity());
+    _decode_graph = std::make_unique<DecodeGraph>(*_model, *_kv_cache, capacity());
   }
 }
 
-torch::Tensor Qwen3Runner::prefill(const std::vector<int64_t>& input_ids) {
+torch::Tensor Runner::prefill(const std::vector<int64_t>& input_ids) {
   TORCH_CHECK(!input_ids.empty() && input_ids.size() <= static_cast<size_t>(capacity()),
               "Prompt must be nonempty and fit in the KV cache");
   for (int64_t token : input_ids) {
@@ -67,7 +67,7 @@ torch::Tensor Qwen3Runner::prefill(const std::vector<int64_t>& input_ids) {
   return _model->forward(input_ids, 1, 0);
 }
 
-torch::Tensor Qwen3Runner::decode(int64_t token_id, int64_t position) {
+torch::Tensor Runner::decode(int64_t token_id, int64_t position) {
   TORCH_CHECK(position >= 0 && position < capacity(), "Decode position exceeds KV capacity");
   TORCH_CHECK(token_id >= 0 && token_id < _vocab_size, "Decode token is outside the vocabulary");
   if (_decode_graph) {
@@ -83,15 +83,15 @@ torch::Tensor Qwen3Runner::decode(int64_t token_id, int64_t position) {
 #endif
 }
 
-void Qwen3Runner::reset() {
+void Runner::reset() {
   _kv_cache->reset();
 }
 
-int64_t Qwen3Runner::capture_count() const {
+int64_t Runner::capture_count() const {
   return _decode_graph ? _decode_graph->capture_count() : 0;
 }
 
-int64_t Qwen3Runner::replay_count() const {
+int64_t Runner::replay_count() const {
   return _decode_graph ? _decode_graph->replay_count() : 0;
 }
 

@@ -1,26 +1,26 @@
-#ifndef _QWEN3_RUNNER_H
-#define _QWEN3_RUNNER_H
+#ifndef SMARTLLM_RUNNER_H
+#define SMARTLLM_RUNNER_H
 
 #include <memory>
 #include <string>
 #include <vector>
-#include "qwen3.h"
-#include "qwen3_graph.h"
+#include "model/qwen3/qwen3.h"
+#include "graph.h"
 
 // Batch=1, serialized calls on one execution stream. The caller initializes
 // the device runtime before construction and finalizes it after destruction.
 // Sampling and the generation loop remain with the caller.
-class Qwen3Runner {
+class Runner {
 public:
-  Qwen3Runner(
+  Runner(
     const std::string& model_path,
     torch::Device device,
     torch::Dtype dtype,
     int max_seq_len = 2048,
     bool decode_graph = false
     );
-  Qwen3Runner(const Qwen3Runner&) = delete;
-  Qwen3Runner& operator=(const Qwen3Runner&) = delete;
+  Runner(const Runner&) = delete;
+  Runner& operator=(const Runner&) = delete;
 
   // Start a prompt at position zero, returning only the last token's logits.
   torch::Tensor prefill(const std::vector<int64_t>& input_ids);
@@ -40,7 +40,7 @@ private:
   std::unique_ptr<Qwen3ForCausalLM> _model;
   torch::Tensor _decode_token;
   torch::Tensor _decode_position;
-  std::unique_ptr<Qwen3DecodeGraph> _decode_graph;
+  std::unique_ptr<DecodeGraph> _decode_graph;
 };
 
 #endif

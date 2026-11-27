@@ -1,5 +1,5 @@
-#ifndef QWEN3_ENGINE_H
-#define QWEN3_ENGINE_H
+#ifndef SMARTLLM_ENGINE_H
+#define SMARTLLM_ENGINE_H
 
 #include <condition_variable>
 #include <functional>
@@ -10,10 +10,10 @@
 #include <string>
 #include <thread>
 
-class Qwen3Runner;
+class Runner;
 class QwenToken;
 
-class Qwen3Engine {
+class Engine {
 public:
   struct Request {
     std::string prompt;
@@ -30,14 +30,14 @@ public:
   // Return false when the consumer disconnects, to stop generation.
   using TokenCallback = std::function<bool(const std::string&)>;
 
-  Qwen3Engine(
+  Engine(
     const std::string& model_path,
     const std::string& device,
     int max_seq_len,
     bool decode_graph,
     const std::string& profile_dir = ""
     );
-  ~Qwen3Engine();
+  ~Engine();
   Result generate(const Request& request, TokenCallback on_token = {});
   void start_profile();
   std::string stop_profile();
@@ -60,7 +60,7 @@ private:
     std::promise<void> ready
     );
   Result generate(
-    Qwen3Runner& runner,
+    Runner& runner,
     QwenToken& tokenizer,
     const Job& job
     );

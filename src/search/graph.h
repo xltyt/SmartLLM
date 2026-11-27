@@ -1,5 +1,5 @@
-#ifndef SMARTLLM_QWEN3_GRAPH_H
-#define SMARTLLM_QWEN3_GRAPH_H
+#ifndef SMARTLLM_GRAPH_H
+#define SMARTLLM_GRAPH_H
 
 #define C10_USE_GLOG
 #include <torch/torch.h>
@@ -18,13 +18,13 @@ class KVCache;
 // Prepare weights/RoPE before first forward. Model/cache must outlive this object;
 // do not reload/move weights or reallocate cache until this object is destroyed.
 // Returned logits are independent of later replays. Same-stream cache reset is safe.
-class Qwen3DecodeGraph {
+class DecodeGraph {
 public:
   static bool supported();
-  Qwen3DecodeGraph(Qwen3ForCausalLM& model, KVCache& cache, int64_t context_len);
-  ~Qwen3DecodeGraph();
-  Qwen3DecodeGraph(const Qwen3DecodeGraph&) = delete;
-  Qwen3DecodeGraph& operator=(const Qwen3DecodeGraph&) = delete;
+  DecodeGraph(Qwen3ForCausalLM& model, KVCache& cache, int64_t context_len);
+  ~DecodeGraph();
+  DecodeGraph(const DecodeGraph&) = delete;
+  DecodeGraph& operator=(const DecodeGraph&) = delete;
 
   torch::Tensor forward(int64_t token_id, int64_t start_pos);
   int64_t capture_count() const;
