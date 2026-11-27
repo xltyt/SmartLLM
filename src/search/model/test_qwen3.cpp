@@ -797,6 +797,43 @@ TEST_F(Qwen3StaticDecode, DevicePositionUpdatesTheRequestedSlot) {
   EXPECT_THROW(cache.update_static(0, key, value, DecodeContext{position, 17}), c10::Error);
 }
 
+TEST_F(Qwen3StaticDecode, DistinctRowsAndCapacityBoundary) {
+  torch::NoGradGuard no_grad;
+  // Different values across batches/heads expose flattened-row indexing mistakes.
+  KVCache cache(1, 2, 3, 8, 16, torch::kBFloat16, device);
+  KVCache expected_cache(1, 2, 3, 8, 16, torch::kBFloat16, device);
+  auto options = torch::TensorOptions().dtype(torch::kBFloat16).device(device);
+  auto key = torch::arange(96, options).view({2, 3, 1, 16}).slice(3, 0, 16, 2);
+  auto value = key + 100;
+  ASSERT_FALSE(key.is_contiguous());
+  auto position = torch::zeros({1}, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  DecodeContext context{position, 8};
+  auto first = cache.update_static(0, key, value, context);
+  (void)expected_cache.update(0, key, value, 0);
+  const void* key_address = first.first.data_ptr();
+  const void* value_address = first.second.data_ptr();
+  for (int slot : {5, 5, 15}) {
+    position.fill_(slot);
+    if (slot == 15) {
+      context.context_len = 16;
+    }
+    key.add_(1);
+    value.add_(1);
+    auto actual = cache.update_static(0, key, value, context);
+    auto expected = expected_cache.update(0, key, value, slot);
+    EXPECT_EQ(actual.first.data_ptr(), key_address);
+    EXPECT_EQ(actual.second.data_ptr(), value_address);
+    EXPECT_TRUE(torch::equal(actual.first.narrow(2, 0, slot + 1), expected.first));
+    EXPECT_TRUE(torch::equal(actual.second.narrow(2, 0, slot + 1), expected.second));
+  }
+  cache.reset();
+  auto actual = cache.update_static(0, key, value, context);
+  expected_cache.reset();
+  auto expected = expected_cache.update(0, key, value, 15);
+  EXPECT_TRUE(torch::equal(actual.first, expected.first));
+  EXPECT_TRUE(torch::equal(actual.second, expected.second));
+}
+
 TEST_F(Qwen3StaticDecode, MatchesEagerAcrossPositionsAndStaleCacheTail) {
   torch::NoGradGuard no_grad;
   torch::manual_seed(177);

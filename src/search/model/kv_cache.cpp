@@ -1,4 +1,7 @@
 #include "kv_cache.h"
+#if USE_NPU
+#include <torch_npu/csrc/aten/CustomFunctions.h>
+#endif
 
 KVCache::KVCache(
   int num_layers,
@@ -91,12 +94,29 @@ std::pair<torch::Tensor, torch::Tensor> KVCache::update_static(
               k_states.device() == cache.device() && v_states.device() == cache.device() &&
               k_states.scalar_type() == cache.scalar_type() && v_states.scalar_type() == cache.scalar_type(),
               "Static KV update requires matching single-token K/V tensors");
-  // Some TorchNPU index_copy_ paths use index.item(), which breaks capture.
-  // Tensor scatter consumes indices on device. There is exactly one write per
-  // (batch, head, channel), so this does not introduce duplicate-index races.
+#if USE_NPU
+  // Update one complete head row per (batch, head), without transposing the cache.
+  // Use the allocated capacity as the row stride; context_len can be smaller.
+  // Keep positions on device so graph replay can change the destination slot.
+  const int64_t rows = cache.size(0) * cache.size(1);
+  auto indices = (torch::arange(rows, positions.options()) * cache.size(2) + positions).view({rows, 1});
+  auto k_flat = _k_cache[layer_idx].view({-1, cache.size(3)});
+  auto v_flat = _v_cache[layer_idx].view({-1, cache.size(3)});
+  at_npu::native::custom_ops::npu_scatter_nd_update_(
+    k_flat,
+    indices,
+    k_states.reshape({rows, cache.size(3)})
+    );
+  at_npu::native::custom_ops::npu_scatter_nd_update_(
+    v_flat,
+    indices,
+    v_states.reshape({rows, cache.size(3)})
+    );
+#else
   auto indices = positions.view({1,1,1,1}).expand(k_states.sizes()).contiguous();
   _k_cache[layer_idx].scatter_(2, indices, k_states);
   _v_cache[layer_idx].scatter_(2, indices, v_states);
+#endif
   return {_k_cache[layer_idx].narrow(2, 0, context.context_len),
           _v_cache[layer_idx].narrow(2, 0, context.context_len)};
 }
